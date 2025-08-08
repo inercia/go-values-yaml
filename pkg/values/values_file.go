@@ -70,11 +70,11 @@ func ExtractCommon(path1, path2 string, opts ...Option) (commonPath string, err 
 	}
 
 	// Read YAML files
-	y1, err := os.ReadFile(path1)
+	y1, err := os.ReadFile(filepath.Clean(path1))
 	if err != nil {
 		return "", err
 	}
-	y2, err := os.ReadFile(path2)
+	y2, err := os.ReadFile(filepath.Clean(path2))
 	if err != nil {
 		return "", err
 	}
@@ -139,7 +139,7 @@ func ExtractCommonN(paths []string, opts ...Option) (commonPath string, err erro
 	// Read content
 	yams := make([][]byte, len(paths))
 	for i, p := range paths {
-		b, err := os.ReadFile(p)
+		b, err := os.ReadFile(filepath.Clean(p))
 		if err != nil {
 			return "", err
 		}

@@ -225,10 +225,10 @@ func TestExtractCommon_ParentUnwritable_ErrorNoChanges(t *testing.T) {
 	mustWriteFile(t, p2, orig2)
 
 	// Make parent read-only to block common file creation
-	if err := os.Chmod(parent, 0o555); err != nil {
+	if err := os.Chmod(parent, 0o555); err != nil { //nolint:gosec // tests intentionally set directory perms
 		t.Skipf("chmod failed, skipping: %v", err)
 	}
-	defer os.Chmod(parent, 0o755)
+	defer func() { _ = os.Chmod(parent, 0o750) }() //nolint:gosec // restoring directory perms for tests
 
 	_, err := ExtractCommon(p1, p2)
 	if err == nil {
@@ -269,10 +269,10 @@ func TestExtractCommonN_ParentUnwritable_ErrorNoChanges(t *testing.T) {
 	for _, p := range paths {
 		mustWriteFile(t, p, []byte("k: v\n"))
 	}
-	if err := os.Chmod(parent, 0o555); err != nil {
+	if err := os.Chmod(parent, 0o555); err != nil { //nolint:gosec // tests intentionally set directory perms
 		t.Skipf("chmod failed, skipping: %v", err)
 	}
-	defer os.Chmod(parent, 0o755)
+	defer func() { _ = os.Chmod(parent, 0o750) }() //nolint:gosec // restoring directory perms for tests
 
 	_, err := ExtractCommonN(paths)
 	if err == nil {
@@ -576,24 +576,24 @@ func TestExtractCommonRecursive_UpwardStopsOnNoCommon(t *testing.T) {
 
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
-	if err := os.MkdirAll(path, 0o755); err != nil {
+	if err := os.MkdirAll(path, 0o750); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 }
 
 func mustWriteFile(t *testing.T, path string, data []byte) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatalf("mkdir for write: %v", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 }
 
 func mustReadFile(t *testing.T, path string) []byte {
 	t.Helper()
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		t.Fatalf("read file: %v", err)
 	}
