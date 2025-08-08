@@ -164,6 +164,61 @@ parent:
 	assertYAMLEqual(t, y2, m2)
 }
 
+func TestExtractCommon_NoCommon_DisjointKeys(t *testing.T) {
+	y1 := []byte(`
+a: 1
+b:
+  c: 2
+`)
+	y2 := []byte(`
+x: true
+y:
+  z: 3
+`)
+
+	common, u1, u2, err := ExtractCommon(y1, y2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertYAMLEqual(t, []byte("{}\n"), common)
+	assertYAMLEqual(t, y1, u1)
+	assertYAMLEqual(t, y2, u2)
+}
+
+func TestExtractCommon_NoCommon_DifferentTopLevelLists(t *testing.T) {
+	y1 := []byte(`
+- 1
+- 2
+`)
+	y2 := []byte(`
+- 3
+- 4
+`)
+
+	common, u1, u2, err := ExtractCommon(y1, y2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertYAMLEqual(t, []byte("{}\n"), common)
+	assertYAMLEqual(t, y1, u1)
+	assertYAMLEqual(t, y2, u2)
+}
+
+func TestExtractCommon_NoCommon_DifferentTypes(t *testing.T) {
+	y1 := []byte(`a: 1`)
+	y2 := []byte(`
+- item1
+- item2
+`)
+	common, u1, u2, err := ExtractCommon(y1, y2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertYAMLEqual(t, []byte("{}\n"), common)
+	assertYAMLEqual(t, y1, u1)
+	assertYAMLEqual(t, y2, u2)
+}
+
 // assertYAMLEqual compares YAML by unmarshaling and deep comparing.
 func assertYAMLEqual(t *testing.T, expect, got []byte) {
 	t.Helper()
