@@ -36,7 +36,9 @@ func TestExtractCommon_CreatesCommonAndUpdatesChildren(t *testing.T) {
 	mustWriteFile(t, p2, y2)
 
 	commonPath, err := ExtractCommon(p1, p2)
-	if err != nil { t.Fatalf("ExtractCommon error: %v", err) }
+	if err != nil {
+		t.Fatalf("ExtractCommon error: %v", err)
+	}
 
 	if commonPath != filepath.Join(bdir, "values.yaml") {
 		t.Fatalf("unexpected common path: %s", commonPath)
@@ -96,6 +98,92 @@ func TestExtractCommon_NoCommon_ReturnsErrAndNoChanges(t *testing.T) {
 	assertYAMLEqual(t, y2, mustReadFile(t, p2))
 }
 
+func TestExtractCommonN_CreatesCommonAndUpdatesAll(t *testing.T) {
+	dir := t.TempDir()
+	bdir := filepath.Join(dir, "a", "b")
+	d1 := filepath.Join(bdir, "x")
+	d2 := filepath.Join(bdir, "y")
+	d3 := filepath.Join(bdir, "z")
+	mustMkdirAll(t, d1)
+	mustMkdirAll(t, d2)
+	mustMkdirAll(t, d3)
+
+	p1 := filepath.Join(d1, "values.yaml")
+	p2 := filepath.Join(d2, "values.yaml")
+	p3 := filepath.Join(d3, "values.yaml")
+
+	y1 := []byte(`foo:
+  bar:
+    a: 1
+    same: true
+`)
+	y2 := []byte(`foo:
+  bar:
+    b: 2
+    same: true
+`)
+	y3 := []byte(`foo:
+  bar:
+    c: 3
+    same: true
+`)
+
+	mustWriteFile(t, p1, y1)
+	mustWriteFile(t, p2, y2)
+	mustWriteFile(t, p3, y3)
+
+	commonPath, err := ExtractCommonN([]string{p1, p2, p3})
+	if err != nil {
+		t.Fatalf("ExtractCommonN error: %v", err)
+	}
+	if commonPath != filepath.Join(bdir, "values.yaml") {
+		t.Fatalf("unexpected common path: %s", commonPath)
+	}
+
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    same: true
+`), mustReadFile(t, commonPath))
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    a: 1
+`), mustReadFile(t, p1))
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    b: 2
+`), mustReadFile(t, p2))
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    c: 3
+`), mustReadFile(t, p3))
+}
+
+func TestExtractCommonN_NoCommon_ReturnsErrAndNoChanges(t *testing.T) {
+	dir := t.TempDir()
+	bdir := filepath.Join(dir, "a", "b")
+	d1 := filepath.Join(bdir, "x")
+	d2 := filepath.Join(bdir, "y")
+	mustMkdirAll(t, d1)
+	mustMkdirAll(t, d2)
+
+	p1 := filepath.Join(d1, "values.yaml")
+	p2 := filepath.Join(d2, "values.yaml")
+	mustWriteFile(t, p1, []byte(`a: 1`))
+	mustWriteFile(t, p2, []byte(`b: 2`))
+
+	_, err := ExtractCommonN([]string{p1, p2})
+	if err == nil {
+		t.Fatalf("expected ErrNoCommon, got nil")
+	}
+	if err != ErrNoCommon {
+		t.Fatalf("expected ErrNoCommon, got %v", err)
+	}
+
+	// unchanged
+	assertYAMLEqual(t, []byte("a: 1\n"), mustReadFile(t, p1))
+	assertYAMLEqual(t, []byte("b: 2\n"), mustReadFile(t, p2))
+}
+
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
@@ -116,7 +204,9 @@ func mustWriteFile(t *testing.T, path string, data []byte) {
 func mustReadFile(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)
-	if err != nil { t.Fatalf("read file: %v", err) }
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
 	return data
 }
 

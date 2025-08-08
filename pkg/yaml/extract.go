@@ -81,6 +81,169 @@ func ExtractCommon(yaml1, yaml2 []byte, opts ...Option) ([]byte, []byte, []byte,
 	return commonY, r1Y, r2Y, nil
 }
 
+// ExtractCommonN computes the common structure across N YAML documents and returns:
+//  1. the common structure
+//  2. N remainders (each input without the common part)
+//
+// The merge property holds for each i: merge(remainders[i], common) == original[i].
+func ExtractCommonN(yamls [][]byte, opts ...Option) ([]byte, [][]byte, error) {
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(&options)
+	}
+	values := make([]any, len(yamls))
+	for i, y := range yamls {
+		var v any
+		if len(y) > 0 {
+			if err := syaml.Unmarshal(y, &v); err != nil {
+				return nil, nil, err
+			}
+		}
+		values[i] = v
+	}
+	common := computeCommonAcross(values, options)
+	common = normalizeDocRoot(common)
+
+	remainders := make([][]byte, len(values))
+	for i, v := range values {
+		r := subtractCommon(v, common, options)
+		r = normalizeDocRoot(r)
+		b, err := syaml.Marshal(r)
+		if err != nil {
+			return nil, nil, err
+		}
+		remainders[i] = b
+	}
+	commonY, err := syaml.Marshal(common)
+	if err != nil {
+		return nil, nil, err
+	}
+	return commonY, remainders, nil
+}
+
+// computeCommonAcross returns the common structure across all provided values.
+func computeCommonAcross(values []any, options Options) any {
+	if len(values) == 0 {
+		return nil
+	}
+	// If any value is nil, it is considered an empty doc.
+	// Handle homogeneous kinds.
+	allScalars := true
+	allMaps := true
+	allLists := true
+	for _, v := range values {
+		if !isScalar(v) {
+			allScalars = false
+		}
+		if _, ok := asStringMap(v); !ok {
+			allMaps = false
+		}
+		if _, ok := asList(v); !ok {
+			allLists = false
+		}
+	}
+	if allScalars {
+		base := values[0]
+		for _, v := range values[1:] {
+			if !reflect.DeepEqual(base, v) {
+				return nil
+			}
+		}
+		return base
+	}
+	if allLists {
+		if !options.IncludeEqualListsInCommon {
+			return nil
+		}
+		base, _ := asList(values[0])
+		for _, v := range values[1:] {
+			l, _ := asList(v)
+			if !reflect.DeepEqual(base, l) {
+				return nil
+			}
+		}
+		return base
+	}
+	if allMaps {
+		// Intersect keys present in all maps, then recursively compute common
+		// for each key.
+		intersection := make(map[string]struct{})
+		first, _ := asStringMap(values[0])
+		for k := range first {
+			intersection[k] = struct{}{}
+		}
+		for _, v := range values[1:] {
+			m, _ := asStringMap(v)
+			for k := range intersection {
+				if _, ok := m[k]; !ok {
+					delete(intersection, k)
+				}
+			}
+		}
+		if len(intersection) == 0 {
+			return nil
+		}
+		out := make(map[string]any)
+		for k := range intersection {
+			// collect values for key k across all maps
+			keyVals := make([]any, 0, len(values))
+			for _, v := range values {
+				m, _ := asStringMap(v)
+				keyVals = append(keyVals, m[k])
+			}
+			c := computeCommonAcross(keyVals, options)
+			if !isEmpty(c) {
+				out[k] = c
+			}
+		}
+		return mapOrNil(out)
+	}
+	return nil
+}
+
+// subtractCommon removes common from v and returns the remainder that when merged
+// with common reconstructs v.
+func subtractCommon(v any, common any, options Options) any {
+	if common == nil {
+		return v
+	}
+	if isScalar(v) || isScalar(common) {
+		if reflect.DeepEqual(v, common) {
+			return nil
+		}
+		return v
+	}
+	if vm, ok := asStringMap(v); ok {
+		if cm, ok := asStringMap(common); ok {
+			out := make(map[string]any)
+			// keys in v that are not in common are kept as-is
+			for k, vv := range vm {
+				if cv, ok := cm[k]; ok {
+					r := subtractCommon(vv, cv, options)
+					if !isEmpty(r) {
+						out[k] = r
+					}
+				} else {
+					out[k] = vv
+				}
+			}
+			return mapOrNil(out)
+		}
+		// map vs non-map -> nothing in common for this branch
+		return v
+	}
+	if vl, ok := asList(v); ok {
+		if cl, ok := asList(common); ok {
+			if options.IncludeEqualListsInCommon && reflect.DeepEqual(vl, cl) {
+				return nil
+			}
+			return v
+		}
+		return v
+	}
+	return v
+}
+
 // extractCommonValue returns the common part between a and b, and the remainders
 // of a and b after removing the common part. The merge property holds for the
 // triplet (common, ra, rb): merge(ra, common) == a and merge(rb, common) == b.

@@ -70,13 +70,19 @@ func ExtractCommon(path1, path2 string, opts ...Option) (commonPath string, err 
 
 	// Read YAML files
 	y1, err := os.ReadFile(path1)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	y2, err := os.ReadFile(path2)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 
 	// Compute common and remainders using pkg/yaml
 	commonY, u1Y, u2Y, err := yamllib.ExtractCommon(y1, y2, yamllib.WithIncludeEqualListsInCommon(options.IncludeEqualListsInCommon))
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 
 	// If common is empty ({}), do nothing
 	if isEmptyYAML(commonY) {
@@ -85,10 +91,79 @@ func ExtractCommon(path1, path2 string, opts ...Option) (commonPath string, err 
 
 	// Write common and updated files atomically
 	commonPath = filepath.Join(p1, "values.yaml")
-	if err := writeFileAtomic(commonPath, commonY, 0o644); err != nil { return "", err }
-	if err := writeFileAtomic(path1, u1Y, 0o644); err != nil { return "", err }
-	if err := writeFileAtomic(path2, u2Y, 0o644); err != nil { return "", err }
+	if err := writeFileAtomic(commonPath, commonY, 0o644); err != nil {
+		return "", err
+	}
+	if err := writeFileAtomic(path1, u1Y, 0o644); err != nil {
+		return "", err
+	}
+	if err := writeFileAtomic(path2, u2Y, 0o644); err != nil {
+		return "", err
+	}
 
+	return commonPath, nil
+}
+
+// ExtractCommonN performs the same operation as ExtractCommon but for N sibling
+// values.yaml files. It writes the common structure to the shared parent directory
+// as values.yaml and updates each provided file with its remainder.
+// Returns the path to the common file or ErrNoCommon if there is no common content.
+func ExtractCommonN(paths []string, opts ...Option) (commonPath string, err error) {
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(&options)
+	}
+	if len(paths) < 2 {
+		return "", fmt.Errorf("need at least 2 files, got %d", len(paths))
+	}
+	// Validate names and gather parent
+	parents := make(map[string]struct{})
+	for _, p := range paths {
+		if filepath.Base(p) != "values.yaml" {
+			return "", fmt.Errorf("file must be named values.yaml: %s", p)
+		}
+		if err := assertFileExists(p); err != nil {
+			return "", err
+		}
+		parents[filepath.Dir(filepath.Dir(p))] = struct{}{}
+	}
+	if len(parents) != 1 {
+		return "", fmt.Errorf("all files must share the same parent directory one level up")
+	}
+	var parent string
+	for k := range parents {
+		parent = k
+	}
+
+	// Read content
+	yams := make([][]byte, len(paths))
+	for i, p := range paths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return "", err
+		}
+		yams[i] = b
+	}
+
+	// Compute common and remainders
+	commonY, remainders, err := yamllib.ExtractCommonN(yams, yamllib.WithIncludeEqualListsInCommon(options.IncludeEqualListsInCommon))
+	if err != nil {
+		return "", err
+	}
+	if isEmptyYAML(commonY) {
+		return "", ErrNoCommon
+	}
+
+	// Write outputs
+	commonPath = filepath.Join(parent, "values.yaml")
+	if err := writeFileAtomic(commonPath, commonY, 0o644); err != nil {
+		return "", err
+	}
+	for i, p := range paths {
+		if err := writeFileAtomic(p, remainders[i], 0o644); err != nil {
+			return "", err
+		}
+	}
 	return commonPath, nil
 }
 
@@ -130,17 +205,27 @@ func isEmpty(v any) bool {
 func writeFileAtomic(path string, data []byte, perm fs.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".values-*.tmp")
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	name := tmp.Name()
 	defer func() {
 		_ = tmp.Close()
 		_ = os.Remove(name)
 	}()
 
-	if _, err := tmp.Write(data); err != nil { return err }
-	if err := tmp.Chmod(perm); err != nil { return err }
-	if err := tmp.Sync(); err != nil { return err }
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
 
-	if err := tmp.Close(); err != nil { return err }
+	if err := tmp.Close(); err != nil {
+		return err
+	}
 	return os.Rename(name, path)
 }

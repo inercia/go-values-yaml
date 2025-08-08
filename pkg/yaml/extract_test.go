@@ -219,6 +219,92 @@ func TestExtractCommon_NoCommon_DifferentTypes(t *testing.T) {
 	assertYAMLEqual(t, y2, u2)
 }
 
+func TestExtractCommonN_ThreeDocs_CommonAndRemainders(t *testing.T) {
+	inputs := [][]byte{
+		[]byte(`foo:
+  bar:
+    k1: v1
+    same: true
+`),
+		[]byte(`foo:
+  bar:
+    k2: v2
+    same: true
+`),
+		[]byte(`foo:
+  bar:
+    k3: v3
+    same: true
+`),
+	}
+	common, rems, err := ExtractCommonN(inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    same: true
+`), common)
+	if len(rems) != 3 {
+		t.Fatalf("expected 3 remainders, got %d", len(rems))
+	}
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    k1: v1
+`), rems[0])
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    k2: v2
+`), rems[1])
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    k3: v3
+`), rems[2])
+
+	// Merge property
+	m0, _ := MergeYAML(rems[0], common)
+	m1, _ := MergeYAML(rems[1], common)
+	m2, _ := MergeYAML(rems[2], common)
+	assertYAMLEqual(t, inputs[0], m0)
+	assertYAMLEqual(t, inputs[1], m1)
+	assertYAMLEqual(t, inputs[2], m2)
+}
+
+func TestExtractCommonN_Lists_AllEqual_DefaultInCommon(t *testing.T) {
+	inputs := [][]byte{
+		[]byte(`a: [1,2,3]`),
+		[]byte(`a: [1,2,3]`),
+		[]byte(`a: [1,2,3]`),
+	}
+	common, rems, err := ExtractCommonN(inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertYAMLEqual(t, []byte("a:\n- 1\n- 2\n- 3\n"), common)
+	for _, r := range rems {
+		assertYAMLEqual(t, []byte("{}\n"), r)
+	}
+}
+
+func TestExtractCommonN_Disjoint_NoCommon(t *testing.T) {
+	inputs := [][]byte{
+		[]byte(`a: 1`),
+		[]byte(`b: 2`),
+		[]byte(`c: 3`),
+	}
+	common, rems, err := ExtractCommonN(inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertYAMLEqual(t, []byte("{}\n"), common)
+	if len(rems) != 3 {
+		t.Fatalf("expected 3 remainders, got %d", len(rems))
+	}
+	assertYAMLEqual(t, []byte("a: 1\n"), rems[0])
+	assertYAMLEqual(t, []byte("b: 2\n"), rems[1])
+	assertYAMLEqual(t, []byte("c: 3\n"), rems[2])
+}
+
 // assertYAMLEqual compares YAML by unmarshaling and deep comparing.
 func assertYAMLEqual(t *testing.T, expect, got []byte) {
 	t.Helper()
