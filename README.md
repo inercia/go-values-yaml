@@ -1,6 +1,11 @@
 # go-values-yaml
 
-Golang library skeleton. Implementation will be added later.
+Go library with utilities for managing Helm values.yaml files (useful for Argo CD/Helm repos).
+
+## Features
+
+- Extract common structure between two YAML docs.
+- File-based extraction for values.yaml siblings, .writing common to the parent dir
 
 ## Development
 
@@ -14,4 +19,5 @@ Golang library skeleton. Implementation will be added later.
 
 ## Module path
 
-The default module path is `github.com/inercia/go-values-yaml`. Update `go.mod` if your GitHub org/repo differ.
+The default module path is `github.com/inercia/go-values-yaml`.
+Update `go.mod` if your GitHub org/repo differ.
