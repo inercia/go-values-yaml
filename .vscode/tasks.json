@@ -5,15 +5,22 @@
       "label": "Make: Build",
       "type": "shell",
       "command": "make build",
-      "group": { "kind": "build", "isDefault": true },
-      "problemMatcher": ["$go"]
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$go"
+      ]
     },
     {
       "label": "Make: Test",
       "type": "shell",
       "command": "make test",
       "group": "test",
-      "problemMatcher": ["$go-test"]
+      "problemMatcher": [
+        "$go-test"
+      ]
     },
     {
       "label": "Make: Lint",
@@ -28,7 +35,10 @@
     {
       "label": "Make: Format",
       "type": "shell",
-      "command": "make fmt"
+      "command": "make fmt",
+      "problemMatcher": [
+        "$go"
+      ]
     },
     {
       "label": "Make: Format Check",
