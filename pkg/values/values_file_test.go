@@ -184,6 +184,101 @@ func TestExtractCommonN_NoCommon_ReturnsErrAndNoChanges(t *testing.T) {
 	assertYAMLEqual(t, []byte("b: 2\n"), mustReadFile(t, p2))
 }
 
+func TestExtractCommon_NotSiblings_Error(t *testing.T) {
+	dir := t.TempDir()
+	adir := filepath.Join(dir, "a", "x")
+	bdir := filepath.Join(dir, "b", "y")
+	mustMkdirAll(t, adir)
+	mustMkdirAll(t, bdir)
+
+	p1 := filepath.Join(adir, "values.yaml")
+	p2 := filepath.Join(bdir, "values.yaml")
+	mustWriteFile(t, p1, []byte("a: 1\n"))
+	mustWriteFile(t, p2, []byte("a: 1\n"))
+
+	_, err := ExtractCommon(p1, p2)
+	if err == nil {
+		t.Fatalf("expected error for non-sibling files, got nil")
+	}
+	// ensure no common file written in either parent
+	if _, err := os.Stat(filepath.Join(filepath.Dir(adir), "values.yaml")); err == nil {
+		t.Fatalf("unexpected common file created under %s", filepath.Dir(adir))
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(bdir), "values.yaml")); err == nil {
+		t.Fatalf("unexpected common file created under %s", filepath.Dir(bdir))
+	}
+}
+
+func TestExtractCommon_ParentUnwritable_ErrorNoChanges(t *testing.T) {
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "parent")
+	x := filepath.Join(parent, "x")
+	y := filepath.Join(parent, "y")
+	mustMkdirAll(t, x)
+	mustMkdirAll(t, y)
+	p1 := filepath.Join(x, "values.yaml")
+	p2 := filepath.Join(y, "values.yaml")
+	orig1 := []byte("a: 1\n")
+	orig2 := []byte("a: 1\n")
+	mustWriteFile(t, p1, orig1)
+	mustWriteFile(t, p2, orig2)
+
+	// Make parent read-only to block common file creation
+	if err := os.Chmod(parent, 0o555); err != nil { t.Skipf("chmod failed, skipping: %v", err) }
+	defer os.Chmod(parent, 0o755)
+
+	_, err := ExtractCommon(p1, p2)
+	if err == nil {
+		t.Fatalf("expected error due to unwritable parent, got nil")
+	}
+	// Ensure children unchanged
+	assertYAMLEqual(t, orig1, mustReadFile(t, p1))
+	assertYAMLEqual(t, orig2, mustReadFile(t, p2))
+	// Ensure no common file exists
+	if _, err := os.Stat(filepath.Join(parent, "values.yaml")); err == nil {
+		t.Fatalf("unexpected common file created in unwritable parent")
+	}
+}
+
+func TestExtractCommonN_NotSiblings_Error(t *testing.T) {
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "a", "x", "values.yaml")
+	p2 := filepath.Join(dir, "a", "y", "values.yaml")
+	p3 := filepath.Join(dir, "b", "z", "values.yaml")
+	mustWriteFile(t, p1, []byte("a: 1\n"))
+	mustWriteFile(t, p2, []byte("a: 1\n"))
+	mustWriteFile(t, p3, []byte("a: 1\n"))
+
+	_, err := ExtractCommonN([]string{p1, p2, p3})
+	if err == nil {
+		t.Fatalf("expected error for non-sibling N files, got nil")
+	}
+}
+
+func TestExtractCommonN_ParentUnwritable_ErrorNoChanges(t *testing.T) {
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "parent")
+	paths := []string{
+		filepath.Join(parent, "x", "values.yaml"),
+		filepath.Join(parent, "y", "values.yaml"),
+		filepath.Join(parent, "z", "values.yaml"),
+	}
+	for _, p := range paths {
+		mustWriteFile(t, p, []byte("k: v\n"))
+	}
+	if err := os.Chmod(parent, 0o555); err != nil { t.Skipf("chmod failed, skipping: %v", err) }
+	defer os.Chmod(parent, 0o755)
+
+	_, err := ExtractCommonN(paths)
+	if err == nil { t.Fatalf("expected error due to unwritable parent, got nil") }
+	for _, p := range paths {
+		assertYAMLEqual(t, []byte("k: v\n"), mustReadFile(t, p))
+	}
+	if _, err := os.Stat(filepath.Join(parent, "values.yaml")); err == nil {
+		t.Fatalf("unexpected common file created in unwritable parent")
+	}
+}
+
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
