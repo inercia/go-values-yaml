@@ -14,4 +14,4 @@ Golang library skeleton. Implementation will be added later.
 
 ## Module path
 
-The default module path is `github.com/alvaro/go-values-yaml`. Update `go.mod` if your GitHub org/repo differ.
+The default module path is `github.com/inercia/go-values-yaml`. Update `go.mod` if your GitHub org/repo differ.
