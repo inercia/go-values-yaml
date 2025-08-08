@@ -168,19 +168,24 @@ func ExtractCommonN(paths []string, opts ...Option) (commonPath string, err erro
 	return commonPath, nil
 }
 
-// ExtractCommonRecursive scans the directory tree rooted at root and, for every
-// directory whose immediate children include two or more leaf directories that each
-// contain a values.yaml file, extracts the common structure across those leaf
-// values into a new values.yaml in the parent directory. Each child values.yaml
-// is updated to its remainder.
+// ExtractCommonRecursive scans the directory tree rooted at root and progressively
+// extracts common structures bottom-up.
 //
-// Behavior:
-// - Only leaf directories (directories with no subdirectories) are considered as children.
-// - Sibling groups with fewer than two values.yaml files are ignored.
-// - Groups with no common content are skipped without error.
-// - Returns a sorted list of the parent values.yaml paths created.
+// Algorithm:
+// - Walk the tree to list all directories and their immediate child directories.
+// - Repeat in passes from deepest parents to shallowest:
+//   - For each parent directory, collect its direct child directories that currently
+//     contain a values.yaml (including ones created in prior passes).
+//   - If two or more child values.yaml files exist, run ExtractCommonN on them to
+//     produce/overwrite the parent values.yaml and update children with remainders.
+//   - Newly created parent values.yaml files make that parent eligible in the next pass
+//     to be grouped with its own siblings at a higher level.
+//
+// - Stops when a full pass creates no new parent values.yaml files.
+//
+// Returns the sorted list of parent values.yaml paths that were created during the run.
 func ExtractCommonRecursive(root string, opts ...Option) ([]string, error) {
-	// Ensure root exists and is a directory
+	// Validate root
 	st, err := os.Stat(root)
 	if err != nil {
 		return nil, err
@@ -189,9 +194,9 @@ func ExtractCommonRecursive(root string, opts ...Option) ([]string, error) {
 		return nil, fmt.Errorf("root is not a directory: %s", root)
 	}
 
-	// Collect all directories and mark which have child directories
+	// Discover directories and parent->children relationships
 	dirs := make(map[string]struct{})
-	hasChildDir := make(map[string]bool)
+	parentToChildren := make(map[string][]string)
 	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -202,52 +207,91 @@ func ExtractCommonRecursive(root string, opts ...Option) ([]string, error) {
 		dirs[path] = struct{}{}
 		if path != root {
 			parent := filepath.Dir(path)
-			hasChildDir[parent] = true
+			parentToChildren[parent] = append(parentToChildren[parent], path)
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 
-	// Identify leaf directories under root
-	leafDirs := make(map[string]struct{})
-	for d := range dirs {
-		if !hasChildDir[d] {
-			leafDirs[d] = struct{}{}
+	// Track which directories currently have a values.yaml file
+	hasValues := make(map[string]bool)
+	for dir := range dirs {
+		if fi, err := os.Stat(filepath.Join(dir, "values.yaml")); err == nil && !fi.IsDir() {
+			hasValues[dir] = true
 		}
 	}
 
-	// Group leaf directories that contain a values.yaml by their parent directory
-	parentToValues := make(map[string][]string)
-	for d := range leafDirs {
-		vp := filepath.Join(d, "values.yaml")
-		fi, err := os.Stat(vp)
-		if err != nil || fi.IsDir() {
-			continue
-		}
-		parent := filepath.Dir(d)
-		parentToValues[parent] = append(parentToValues[parent], vp)
+	// Prepare parents ordered by depth (deepest first)
+	parents := make([]string, 0, len(parentToChildren))
+	for p := range parentToChildren {
+		parents = append(parents, p)
 	}
+	sort.Slice(parents, func(i, j int) bool {
+		return pathDepth(parents[i]) > pathDepth(parents[j])
+	})
 
-	// For each parent with at least two values.yaml children, extract common
-	created := make([]string, 0)
-	for _, paths := range parentToValues {
-		if len(paths) < 2 {
-			continue
-		}
-		commonPath, err := ExtractCommonN(paths, opts...)
-		if err != nil {
-			if errors.Is(err, ErrNoCommon) {
+	// Iteratively extract upwards
+	createdSet := make(map[string]struct{})
+	for {
+		createdInPass := 0
+		for _, parent := range parents {
+			children := parentToChildren[parent]
+			if len(children) == 0 {
 				continue
 			}
-			return nil, err
+			paths := make([]string, 0, len(children))
+			for _, child := range children {
+				if hasValues[child] {
+					vp := filepath.Join(child, "values.yaml")
+					if fi, err := os.Stat(vp); err == nil && !fi.IsDir() {
+						paths = append(paths, vp)
+					}
+				}
+			}
+			if len(paths) < 2 {
+				continue
+			}
+			commonPath, err := ExtractCommonN(paths, opts...)
+			if err != nil {
+				if errors.Is(err, ErrNoCommon) {
+					continue
+				}
+				return nil, err
+			}
+			// Mark parent as now having a values file (if not already)
+			if !hasValues[parent] {
+				hasValues[parent] = true
+				createdInPass++
+			}
+			createdSet[commonPath] = struct{}{}
 		}
-		created = append(created, commonPath)
+		if createdInPass == 0 {
+			break
+		}
 	}
 
-	// Sort for deterministic order
+	// Collect and sort created paths
+	created := make([]string, 0, len(createdSet))
+	for p := range createdSet {
+		created = append(created, p)
+	}
 	sort.Strings(created)
 	return created, nil
+}
+
+// pathDepth returns the number of ancestors between p and the filesystem root.
+func pathDepth(p string) int {
+	depth := 0
+	for {
+		parent := filepath.Dir(p)
+		if parent == p {
+			break
+		}
+		depth++
+		p = parent
+	}
+	return depth
 }
 
 func assertFileExists(path string) error {

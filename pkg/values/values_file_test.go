@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
 
 	syaml "sigs.k8s.io/yaml"
@@ -414,6 +415,163 @@ func TestExtractCommonRecursive_NoCommonGroup_Skip(t *testing.T) {
 	}
 	assertYAMLEqual(t, []byte("a: 1\n"), mustReadFile(t, p1))
 	assertYAMLEqual(t, []byte("b: 2\n"), mustReadFile(t, p2))
+}
+
+func TestExtractCommonRecursive_UpwardPropagation_TwoLevels(t *testing.T) {
+	dir := t.TempDir()
+	// Tree:
+	// /root/a/
+	//   b/
+	//     x/values.yaml   y/values.yaml (share common1)
+	//   c/
+	//     u/values.yaml   v/values.yaml (share common1)
+	// Expect: create /root/a/b/values.yaml and /root/a/c/values.yaml then, since b and c are siblings under a, create /root/a/values.yaml with the common across (b,c)
+	b := filepath.Join(dir, "a", "b")
+	c := filepath.Join(dir, "a", "c")
+	x := filepath.Join(b, "x")
+	y := filepath.Join(b, "y")
+	u := filepath.Join(c, "u")
+	v := filepath.Join(c, "v")
+	for _, d := range []string{x, y, u, v} {
+		mustMkdirAll(t, d)
+	}
+
+	// Define children under b sharing some common and children under c sharing same common key/value
+	mustWriteFile(t, filepath.Join(x, "values.yaml"), []byte(`svc:
+  team: core
+  image: v1
+  replicas: 1
+`))
+	mustWriteFile(t, filepath.Join(y, "values.yaml"), []byte(`svc:
+  team: core
+  image: v1
+  replicas: 2
+`))
+	mustWriteFile(t, filepath.Join(u, "values.yaml"), []byte(`svc:
+  team: core
+  image: v2
+  replicas: 3
+`))
+	mustWriteFile(t, filepath.Join(v, "values.yaml"), []byte(`svc:
+  team: core
+  image: v2
+  replicas: 4
+`))
+
+	created, err := ExtractCommonRecursive(dir)
+	if err != nil {
+		t.Fatalf("ExtractCommonRecursive error: %v", err)
+	}
+
+	// Expect 3 created parents: a/b, a/c, and a
+	expect := []string{
+		filepath.Join(filepath.Dir(b), "values.yaml"), // /a/values.yaml
+		filepath.Join(b, "values.yaml"),
+		filepath.Join(c, "values.yaml"),
+	}
+	// Sort both for deterministic compare
+	sort.Strings(expect)
+	if !reflect.DeepEqual(expect, created) {
+		t.Fatalf("unexpected created: %v", created)
+	}
+
+	// Validate child remainders under a/b
+	assertYAMLEqual(t, []byte(`svc:
+  replicas: 1
+`), mustReadFile(t, filepath.Join(x, "values.yaml")))
+	assertYAMLEqual(t, []byte(`svc:
+  replicas: 2
+`), mustReadFile(t, filepath.Join(y, "values.yaml")))
+
+	// Validate child remainders under a/c
+	assertYAMLEqual(t, []byte(`svc:
+  replicas: 3
+`), mustReadFile(t, filepath.Join(u, "values.yaml")))
+	assertYAMLEqual(t, []byte(`svc:
+  replicas: 4
+`), mustReadFile(t, filepath.Join(v, "values.yaml")))
+
+	// Now a level: the common across (b,c) is team: core only
+	assertYAMLEqual(t, []byte(`svc:
+  team: core
+`), mustReadFile(t, filepath.Join(filepath.Dir(b), "values.yaml")))
+
+	// And a/b and a/c have remainders without the team
+	assertYAMLEqual(t, []byte(`svc:
+  image: v1
+`), mustReadFile(t, filepath.Join(b, "values.yaml")))
+	assertYAMLEqual(t, []byte(`svc:
+  image: v2
+`), mustReadFile(t, filepath.Join(c, "values.yaml")))
+}
+
+func TestExtractCommonRecursive_UpwardStopsOnNoCommon(t *testing.T) {
+	dir := t.TempDir()
+	// Build a case where first level produces parents, but top level has no common across those parents
+	p := filepath.Join(dir, "apps")
+	g1 := filepath.Join(p, "group1")
+	g2 := filepath.Join(p, "group2")
+	a1 := filepath.Join(g1, "a1")
+	a2 := filepath.Join(g1, "a2")
+	b1 := filepath.Join(g2, "b1")
+	b2 := filepath.Join(g2, "b2")
+	for _, d := range []string{a1, a2, b1, b2} {
+		mustMkdirAll(t, d)
+	}
+
+	mustWriteFile(t, filepath.Join(a1, "values.yaml"), []byte(`data:
+  region: us
+  color: blue
+`))
+	mustWriteFile(t, filepath.Join(a2, "values.yaml"), []byte(`data:
+  region: us
+  color: red
+`))
+	mustWriteFile(t, filepath.Join(b1, "values.yaml"), []byte(`data:
+  region: eu
+  color: green
+`))
+	mustWriteFile(t, filepath.Join(b2, "values.yaml"), []byte(`data:
+  region: eu
+  color: yellow
+`))
+
+	created, err := ExtractCommonRecursive(dir)
+	if err != nil {
+		t.Fatalf("ExtractCommonRecursive error: %v", err)
+	}
+
+	// We expect parents at group1 and group2, but no common at apps level
+	expect := []string{filepath.Join(g1, "values.yaml"), filepath.Join(g2, "values.yaml")}
+	sort.Strings(expect)
+	if !reflect.DeepEqual(expect, created) {
+		t.Fatalf("unexpected created: %v", created)
+	}
+
+	assertYAMLEqual(t, []byte(`data:
+  region: us
+`), mustReadFile(t, filepath.Join(g1, "values.yaml")))
+	assertYAMLEqual(t, []byte(`data:
+  color: blue
+`), mustReadFile(t, filepath.Join(a1, "values.yaml")))
+	assertYAMLEqual(t, []byte(`data:
+  color: red
+`), mustReadFile(t, filepath.Join(a2, "values.yaml")))
+
+	assertYAMLEqual(t, []byte(`data:
+  region: eu
+`), mustReadFile(t, filepath.Join(g2, "values.yaml")))
+	assertYAMLEqual(t, []byte(`data:
+  color: green
+`), mustReadFile(t, filepath.Join(b1, "values.yaml")))
+	assertYAMLEqual(t, []byte(`data:
+  color: yellow
+`), mustReadFile(t, filepath.Join(b2, "values.yaml")))
+
+	// Ensure no apps-level values.yaml exists
+	if _, err := os.Stat(filepath.Join(p, "values.yaml")); err == nil {
+		t.Fatalf("unexpected top-level values.yaml created")
+	}
 }
 
 func mustMkdirAll(t *testing.T, path string) {
