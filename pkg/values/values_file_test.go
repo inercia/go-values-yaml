@@ -224,7 +224,9 @@ func TestExtractCommon_ParentUnwritable_ErrorNoChanges(t *testing.T) {
 	mustWriteFile(t, p2, orig2)
 
 	// Make parent read-only to block common file creation
-	if err := os.Chmod(parent, 0o555); err != nil { t.Skipf("chmod failed, skipping: %v", err) }
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Skipf("chmod failed, skipping: %v", err)
+	}
 	defer os.Chmod(parent, 0o755)
 
 	_, err := ExtractCommon(p1, p2)
@@ -266,17 +268,152 @@ func TestExtractCommonN_ParentUnwritable_ErrorNoChanges(t *testing.T) {
 	for _, p := range paths {
 		mustWriteFile(t, p, []byte("k: v\n"))
 	}
-	if err := os.Chmod(parent, 0o555); err != nil { t.Skipf("chmod failed, skipping: %v", err) }
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Skipf("chmod failed, skipping: %v", err)
+	}
 	defer os.Chmod(parent, 0o755)
 
 	_, err := ExtractCommonN(paths)
-	if err == nil { t.Fatalf("expected error due to unwritable parent, got nil") }
+	if err == nil {
+		t.Fatalf("expected error due to unwritable parent, got nil")
+	}
 	for _, p := range paths {
 		assertYAMLEqual(t, []byte("k: v\n"), mustReadFile(t, p))
 	}
 	if _, err := os.Stat(filepath.Join(parent, "values.yaml")); err == nil {
 		t.Fatalf("unexpected common file created in unwritable parent")
 	}
+}
+
+func TestExtractCommonRecursive_SingleParentGroup(t *testing.T) {
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "apps")
+	d1 := filepath.Join(parent, "svc-a")
+	d2 := filepath.Join(parent, "svc-b")
+	mustMkdirAll(t, d1)
+	mustMkdirAll(t, d2)
+
+	p1 := filepath.Join(d1, "values.yaml")
+	p2 := filepath.Join(d2, "values.yaml")
+
+	y1 := []byte(`foo:
+  bar:
+    a: 1
+    common: yes
+`)
+	y2 := []byte(`foo:
+  bar:
+    b: 2
+    common: yes
+`)
+	mustWriteFile(t, p1, y1)
+	mustWriteFile(t, p2, y2)
+
+	created, err := ExtractCommonRecursive(dir)
+	if err != nil {
+		t.Fatalf("ExtractCommonRecursive error: %v", err)
+	}
+	expectCreated := []string{filepath.Join(parent, "values.yaml")}
+	if !reflect.DeepEqual(expectCreated, created) {
+		t.Fatalf("unexpected created list: %v", created)
+	}
+
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    common: yes
+`), mustReadFile(t, filepath.Join(parent, "values.yaml")))
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    a: 1
+`), mustReadFile(t, p1))
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    b: 2
+`), mustReadFile(t, p2))
+}
+
+func TestExtractCommonRecursive_MultipleParents(t *testing.T) {
+	dir := t.TempDir()
+	b := filepath.Join(dir, "env", "prod")
+	c := filepath.Join(dir, "env", "staging")
+	b1 := filepath.Join(b, "app1")
+	b2 := filepath.Join(b, "app2")
+	c1 := filepath.Join(c, "app3")
+	c2 := filepath.Join(c, "app4")
+	mustMkdirAll(t, b1)
+	mustMkdirAll(t, b2)
+	mustMkdirAll(t, c1)
+	mustMkdirAll(t, c2)
+
+	mustWriteFile(t, filepath.Join(b1, "values.yaml"), []byte(`cfg:
+  image: v1
+  replicas: 2
+`))
+	mustWriteFile(t, filepath.Join(b2, "values.yaml"), []byte(`cfg:
+  image: v1
+  replicas: 3
+`))
+	mustWriteFile(t, filepath.Join(c1, "values.yaml"), []byte(`cfg:
+  image: v2
+  replicas: 5
+`))
+	mustWriteFile(t, filepath.Join(c2, "values.yaml"), []byte(`cfg:
+  image: v2
+  replicas: 1
+`))
+
+	created, err := ExtractCommonRecursive(dir)
+	if err != nil {
+		t.Fatalf("ExtractCommonRecursive error: %v", err)
+	}
+	expect := []string{filepath.Join(b, "values.yaml"), filepath.Join(c, "values.yaml")}
+	if !reflect.DeepEqual(expect, created) {
+		t.Fatalf("unexpected created: %v", created)
+	}
+
+	assertYAMLEqual(t, []byte(`cfg:
+  image: v1
+`), mustReadFile(t, filepath.Join(b, "values.yaml")))
+	assertYAMLEqual(t, []byte(`cfg:
+  replicas: 2
+`), mustReadFile(t, filepath.Join(b1, "values.yaml")))
+	assertYAMLEqual(t, []byte(`cfg:
+  replicas: 3
+`), mustReadFile(t, filepath.Join(b2, "values.yaml")))
+
+	assertYAMLEqual(t, []byte(`cfg:
+  image: v2
+`), mustReadFile(t, filepath.Join(c, "values.yaml")))
+	assertYAMLEqual(t, []byte(`cfg:
+  replicas: 5
+`), mustReadFile(t, filepath.Join(c1, "values.yaml")))
+	assertYAMLEqual(t, []byte(`cfg:
+  replicas: 1
+`), mustReadFile(t, filepath.Join(c2, "values.yaml")))
+}
+
+func TestExtractCommonRecursive_NoCommonGroup_Skip(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "group")
+	d1 := filepath.Join(p, "x")
+	d2 := filepath.Join(p, "y")
+	mustMkdirAll(t, d1)
+	mustMkdirAll(t, d2)
+
+	p1 := filepath.Join(d1, "values.yaml")
+	p2 := filepath.Join(d2, "values.yaml")
+	mustWriteFile(t, p1, []byte("a: 1\n"))
+	mustWriteFile(t, p2, []byte("b: 2\n"))
+
+	created, err := ExtractCommonRecursive(dir)
+	if err != nil {
+		t.Fatalf("ExtractCommonRecursive error: %v", err)
+	}
+	if len(created) != 0 {
+		t.Fatalf("expected no parents created, got %v", created)
+	}
+	assertYAMLEqual(t, []byte("a: 1\n"), mustReadFile(t, p1))
+	assertYAMLEqual(t, []byte("b: 2\n"), mustReadFile(t, p2))
 }
 
 func mustMkdirAll(t *testing.T, path string) {

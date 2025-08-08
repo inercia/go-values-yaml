@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 
 	yamllib "github.com/inercia/go-values-yaml/pkg/yaml"
 	syaml "sigs.k8s.io/yaml"
@@ -165,6 +166,88 @@ func ExtractCommonN(paths []string, opts ...Option) (commonPath string, err erro
 		}
 	}
 	return commonPath, nil
+}
+
+// ExtractCommonRecursive scans the directory tree rooted at root and, for every
+// directory whose immediate children include two or more leaf directories that each
+// contain a values.yaml file, extracts the common structure across those leaf
+// values into a new values.yaml in the parent directory. Each child values.yaml
+// is updated to its remainder.
+//
+// Behavior:
+// - Only leaf directories (directories with no subdirectories) are considered as children.
+// - Sibling groups with fewer than two values.yaml files are ignored.
+// - Groups with no common content are skipped without error.
+// - Returns a sorted list of the parent values.yaml paths created.
+func ExtractCommonRecursive(root string, opts ...Option) ([]string, error) {
+	// Ensure root exists and is a directory
+	st, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !st.IsDir() {
+		return nil, fmt.Errorf("root is not a directory: %s", root)
+	}
+
+	// Collect all directories and mark which have child directories
+	dirs := make(map[string]struct{})
+	hasChildDir := make(map[string]bool)
+	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		dirs[path] = struct{}{}
+		if path != root {
+			parent := filepath.Dir(path)
+			hasChildDir[parent] = true
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// Identify leaf directories under root
+	leafDirs := make(map[string]struct{})
+	for d := range dirs {
+		if !hasChildDir[d] {
+			leafDirs[d] = struct{}{}
+		}
+	}
+
+	// Group leaf directories that contain a values.yaml by their parent directory
+	parentToValues := make(map[string][]string)
+	for d := range leafDirs {
+		vp := filepath.Join(d, "values.yaml")
+		fi, err := os.Stat(vp)
+		if err != nil || fi.IsDir() {
+			continue
+		}
+		parent := filepath.Dir(d)
+		parentToValues[parent] = append(parentToValues[parent], vp)
+	}
+
+	// For each parent with at least two values.yaml children, extract common
+	created := make([]string, 0)
+	for _, paths := range parentToValues {
+		if len(paths) < 2 {
+			continue
+		}
+		commonPath, err := ExtractCommonN(paths, opts...)
+		if err != nil {
+			if errors.Is(err, ErrNoCommon) {
+				continue
+			}
+			return nil, err
+		}
+		created = append(created, commonPath)
+	}
+
+	// Sort for deterministic order
+	sort.Strings(created)
+	return created, nil
 }
 
 func assertFileExists(path string) error {
