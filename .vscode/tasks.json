@@ -1,0 +1,59 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Make: Build",
+      "type": "shell",
+      "command": "make build",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$go"]
+    },
+    {
+      "label": "Make: Test",
+      "type": "shell",
+      "command": "make test",
+      "group": "test",
+      "problemMatcher": ["$go-test"]
+    },
+    {
+      "label": "Make: Lint",
+      "type": "shell",
+      "command": "make lint"
+    },
+    {
+      "label": "Make: Vet",
+      "type": "shell",
+      "command": "make vet"
+    },
+    {
+      "label": "Make: Format",
+      "type": "shell",
+      "command": "make fmt"
+    },
+    {
+      "label": "Make: Format Check",
+      "type": "shell",
+      "command": "make fmt-check"
+    },
+    {
+      "label": "Make: Tidy",
+      "type": "shell",
+      "command": "make tidy"
+    },
+    {
+      "label": "Make: Coverage",
+      "type": "shell",
+      "command": "make coverage"
+    },
+    {
+      "label": "Make: Clean",
+      "type": "shell",
+      "command": "make clean"
+    },
+    {
+      "label": "Make: CI",
+      "type": "shell",
+      "command": "make ci"
+    }
+  ]
+}

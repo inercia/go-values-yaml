@@ -1,0 +1,30 @@
+# Binaries
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test and coverage outputs
+*.out
+*.test
+coverage.out
+coverage.html
+coverage/
+.profile.cov
+
+# Build artifacts
+*.a
+
+# Go vendor
+vendor/
+
+# IDE/editor
+.DS_Store
+.idea/
+*.iml
+
+# Logs and temp
+*.log
+tmp/

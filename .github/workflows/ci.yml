@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Detect Go files
+        id: detect
+        shell: bash
+        run: |
+          if git ls-files '*.go' | grep -q .; then
+            echo "has_go_files=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_go_files=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify formatting
+        run: make fmt-check
+
+      - name: Install dev tools
+        if: steps.detect.outputs.has_go_files == 'true'
+        run: make deps
+
+      - name: Build
+        if: steps.detect.outputs.has_go_files == 'true'
+        run: make build
+
+      - name: Vet
+        if: steps.detect.outputs.has_go_files == 'true'
+        run: make vet
+
+      - name: Lint
+        if: steps.detect.outputs.has_go_files == 'true'
+        run: make lint
+
+      - name: Test
+        if: steps.detect.outputs.has_go_files == 'true'
+        run: make test
+
+      - name: Upload coverage artifact
+        if: steps.detect.outputs.has_go_files == 'true' && hashFiles('coverage.out') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage.out
+          path: coverage.out
