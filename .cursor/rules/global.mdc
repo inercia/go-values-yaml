@@ -1,84 +1,98 @@
----
-alwaysApply: false
----
+### Argo CD repository organization (LLM-oriented, concise)
 
-### Argo CD repository organization (concise, LLM-oriented)
+Goal: GitOps repo is the source of truth. Argo CD pulls desired state (from Git) and reconciles clusters.
 
-Goal: A GitOps repo is the single source of truth for the desired state of one or more Kubernetes clusters. Argo CD pulls (not pushes), compares live vs. desired, and reconciles drift.
+Core objects
 
-Core building blocks
-- Applications: Argo CD `Application` objects point to a repo/path/revision and a destination cluster/namespace.
-- ApplicationSets: Generate many `Application` objects from a template (e.g., per cluster, per environment, per directory).
-- AppProjects: Group and guardrails for apps (allowed sources, destinations, namespaces, cluster-scoped resources).
-- Manifests: Typically rendered by Kustomize or Helm, then applied by Argo CD.
+- Application: Points to repo/path/revision and target cluster/namespace.
+- ApplicationSet: Generates many Applications from a template (per env/cluster/dir).
+- AppProject: Groups apps and enforces allowed sources/destinations/resources.
 
-Common repo patterns
-- App-of-Apps: Root repo contains `Application`(s) that bootstrap all other apps (infra, platforms, business apps).
-- Environment-centric: `environments/<env>/...` overlays drive per-env differences; often managed by an `ApplicationSet`.
-- Per-app repos: Each app keeps its own manifests; a central “apps” repo just declares `Application`/`ApplicationSet` objects.
+Typical layout
 
-Typical layout (one-repo, app-of-apps, Kustomize + optional Helm)
+- `apps/`: Argo CD Application/ApplicationSet specs (often includes a root “app of apps”).
+- `projects/`: AppProject definitions.
+- `infra/`: Platform components as apps (ingress, cert-manager, monitoring, logging).
+- `services/<service>/` or `apps/<app>/`: Manifests per workload.
+  - `base/`: env-agnostic Kustomize base or chart defaults
+  - `overlays/<env>/`: env-specific differences (dev/stage/prod)
+- `helm/` or `charts/` (optional): local Helm charts and values files.
 
-- `apps/`:
-  - `*.yaml`: Argo CD `Application`/`ApplicationSet` specs for each component (infra and workloads)
-  - Often includes a `root.yaml` (the “app of apps”) that points to subfolders
-- `projects/`:
-  - `*.yaml`: `AppProject` definitions (permissions, destinations, sources)
-- `infra/`:
-  - Infra add-ons as apps (ingress, cert-manager, monitoring, logging)
-- `clusters/` (optional):
-  - `ApplicationSet` to generate per-cluster apps from a cluster list/labels
-- `services/<service>/` or `apps/<app>/`:
-  - `base/`: Kustomize base (pure, env-agnostic manifests)
-  - `overlays/<env>/`: Kustomize overlays with patches/vars per env (dev/stage/prod)
-- `helm/` or `charts/` (optional):
-  - Helm charts and `values-<env>.yaml` if Helm is used for templating
+### Helm values.yaml in Argo CD (structure, organization, precedence)
 
-Practices and invariants
-- Prefer base + overlays (Kustomize) or Helm with env-specific values; keep base reusable and minimal.
-- Keep secrets out of plain text; commit encrypted (e.g., SOPS) or reference external secret managers.
-- Use `AppProject` to restrict sources/destinations/namespaces and to group related apps.
-- Ordering: use sync-waves and hooks annotations when dependencies must be sequenced.
-- Multi-cluster: generate per-cluster apps via `ApplicationSet` (cluster generator) and label-based targeting.
-- Validation pre-merge: run `kustomize build`/`helm template` + schema checks (e.g., kubeconform) in CI.
-- Branching: `main` typically reflects production; overlays or directories handle env drift explicitly.
-### Argo CD repository organization (concise, LLM-oriented)
+What values.yaml is
 
-Goal: A GitOps repo is the single source of truth for the desired state of one or more Kubernetes clusters. Argo CD pulls (not pushes), compares live vs. desired, and reconciles drift.
+- Input data for Helm templates. It is not a Kubernetes object; it configures how the chart renders manifests.
 
-Core building blocks
-- Applications: Argo CD `Application` objects point to a repo/path/revision and a destination cluster/namespace.
-- ApplicationSets: Generate many `Application` objects from a template (e.g., per cluster, per environment, per directory).
-- AppProjects: Group and guardrails for apps (allowed sources, destinations, namespaces, cluster-scoped resources).
-- Manifests: Typically rendered by Kustomize or Helm, then applied by Argo CD.
+Typical contents
 
-Common repo patterns
-- App-of-Apps: Root repo contains `Application`(s) that bootstrap all other apps (infra, platforms, business apps).
-- Environment-centric: `environments/<env>/...` overlays drive per-env differences; often managed by an `ApplicationSet`.
-- Per-app repos: Each app keeps its own manifests; a central “apps” repo just declares `Application`/`ApplicationSet` objects.
+- Image and rollout: `image.repository`, `image.tag`, `replicaCount`, probes, autoscaling
+- Networking: `service.*`, `ingress.*` (hosts, TLS)
+- Resources and scheduling: `resources`, `nodeSelector`, `tolerations`, `affinity`
+- Storage: `persistence.*`, PVC sizes, storageClass
+- App config: environment variables, flags, config files, annotations/labels, sidecars
+- Security: `securityContext`, `podSecurityContext`, `serviceAccount`
+- Cross-chart: `global.*` for values shared by subcharts
 
-Typical layout (one-repo, app-of-apps, Kustomize + optional Helm)
+Structure
 
-- `apps/`:
-  - `*.yaml`: Argo CD `Application`/`ApplicationSet` specs for each component (infra and workloads)
-  - Often includes a `root.yaml` (the “app of apps”) that points to subfolders
-- `projects/`:
-  - `*.yaml`: `AppProject` definitions (permissions, destinations, sources)
-- `infra/`:
-  - Infra add-ons as apps (ingress, cert-manager, monitoring, logging)
-- `clusters/` (optional):
-  - `ApplicationSet` to generate per-cluster apps from a cluster list/labels
-- `services/<service>/` or `apps/<app>/`:
-  - `base/`: Kustomize base (pure, env-agnostic manifests)
-  - `overlays/<env>/`: Kustomize overlays with patches/vars per env (dev/stage/prod)
-- `helm/` or `charts/` (optional):
-  - Helm charts and `values-<env>.yaml` if Helm is used for templating
+- YAML mapping with nested maps/lists. Types must be preserved across layers.
+- Lists replace (not merge) when overridden. Maps deep-merge. Scalars replace.
+- Avoid implicit types for strings like "on/yes/no"; quote them.
 
-Practices and invariants
-- Prefer base + overlays (Kustomize) or Helm with env-specific values; keep base reusable and minimal.
-- Keep secrets out of plain text; commit encrypted (e.g., SOPS) or reference external secret managers.
-- Use `AppProject` to restrict sources/destinations/namespaces and to group related apps.
-- Ordering: use sync-waves and hooks annotations when dependencies must be sequenced.
-- Multi-cluster: generate per-cluster apps via `ApplicationSet` (cluster generator) and label-based targeting.
-- Validation pre-merge: run `kustomize build`/`helm template` + schema checks (e.g., kubeconform) in CI.
-- Branching: `main` typically reflects production; overlays or directories handle env drift explicitly.
+Organization patterns in Git
+
+- Per environment files: `values/values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml`
+- Per cluster/tenant: `values/cluster-<name>.yaml`, `values/tenant-<name>.yaml`
+- Place value files alongside the chart path used by the Application so relative paths resolve.
+- Example layering order (rightmost wins): `[values.yaml, values-dev.yaml, values-cluster-usw2.yaml, values-tenant-acme.yaml]`
+
+Argo CD source specifics
+
+- Git chart source (repoURL + path): `spec.source.helm.valueFiles` are relative to `spec.source.path`.
+- Helm repo chart source: external value files from your Git cannot be referenced; use inline `values`/`valuesObject`/`parameters` instead.
+- Highest precedence comes from `spec.source.helm.valuesObject`/`values` and `parameters` (like `--set`).
+
+Subcharts and `global`
+
+- Configure subcharts under their name (e.g., `postgresql.enabled: false`). Use `global.*` to share values across subcharts.
+
+Secrets
+
+- Do not commit plaintext secrets. Use SOPS-encrypted values files or external secret stores and reference via templates.
+
+Validation and CI
+
+- Prefer charts with `values.schema.json` for validation.
+- In CI, render with all intended value files: `helm template` and/or `helm lint`, then validate against Kubernetes schemas (e.g., kubeconform).
+
+Editing guidance for tools (important for this library)
+
+- Preserve data types exactly; avoid unintended stringification of numbers/bools.
+- Respect merge semantics: map deep-merge, list replace, scalar replace.
+- Maintain deterministic key ordering only for readability; YAML order is not semantically meaningful.
+- Keep comments if possible but never depend on them for logic.
+- Ensure `valueFiles` order is preserved in Applications; later files override earlier ones.
+
+Short example values.yaml
+
+```yaml
+replicaCount: 2
+image:
+  repository: ghcr.io/org/app
+  tag: "1.4.0"
+service:
+  type: ClusterIP
+  port: 8080
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: app.dev.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 500m, memory: 512Mi }
+```
