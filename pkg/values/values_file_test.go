@@ -574,6 +574,71 @@ func TestExtractCommonRecursive_UpwardStopsOnNoCommon(t *testing.T) {
 	}
 }
 
+func TestExtractCommonRecursive_GrandchildrenSiblings_CommonAtGrandparent(t *testing.T) {
+	dir := t.TempDir()
+	// Layout:
+	// /a/1/X/values.yaml and /a/2/Y/values.yaml
+	a := filepath.Join(dir, "a")
+	oneX := filepath.Join(a, "1", "X")
+	twoY := filepath.Join(a, "2", "Y")
+	mustMkdirAll(t, oneX)
+	mustMkdirAll(t, twoY)
+
+	p1 := filepath.Join(oneX, "values.yaml")
+	p2 := filepath.Join(twoY, "values.yaml")
+
+	// Similar nested structure with a common grandparent-level subset
+	mustWriteFile(t, p1, []byte(`foo:
+  bar:
+    something: [1,2,3]
+    other: true
+`))
+	mustWriteFile(t, p2, []byte(`foo:
+  bar:
+    else: [1,2,3]
+    other: true
+`))
+
+	created, err := ExtractCommonRecursive(dir)
+	if err != nil {
+		t.Fatalf("ExtractCommonRecursive error: %v", err)
+	}
+
+	// Expect a single values.yaml created at /a
+	expect := []string{filepath.Join(a, "values.yaml")}
+	if !reflect.DeepEqual(expect, created) {
+		t.Fatalf("unexpected created: %v", created)
+	}
+
+	// Validate common at /a and remainders at grandchildren
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    other: true
+`), mustReadFile(t, filepath.Join(a, "values.yaml")))
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    something:
+    - 1
+    - 2
+    - 3
+`), mustReadFile(t, p1))
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    else:
+    - 1
+    - 2
+    - 3
+`), mustReadFile(t, p2))
+
+	// Ensure no intermediate values.yaml were created at /a/1 or /a/2
+	if _, err := os.Stat(filepath.Join(a, "1", "values.yaml")); err == nil {
+		t.Fatalf("unexpected values.yaml at %s", filepath.Join(a, "1"))
+	}
+	if _, err := os.Stat(filepath.Join(a, "2", "values.yaml")); err == nil {
+		t.Fatalf("unexpected values.yaml at %s", filepath.Join(a, "2"))
+	}
+}
+
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o750); err != nil {

@@ -14,9 +14,9 @@ import (
 // for use in tests.
 type memfsOps struct{ fsys *memfs.FS }
 
-func (m memfsOps) Stat(name string) (fs.FileInfo, error)                 { return fs.Stat(m.fsys, name) }
-func (m memfsOps) ReadFile(name string) ([]byte, error)                  { return fs.ReadFile(m.fsys, name) }
-func (m memfsOps) WalkDir(root string, fn fs.WalkDirFunc) error          { return fs.WalkDir(m.fsys, root, fn) }
+func (m memfsOps) Stat(name string) (fs.FileInfo, error)        { return fs.Stat(m.fsys, name) }
+func (m memfsOps) ReadFile(name string) ([]byte, error)         { return fs.ReadFile(m.fsys, name) }
+func (m memfsOps) WalkDir(root string, fn fs.WalkDirFunc) error { return fs.WalkDir(m.fsys, root, fn) }
 func (m memfsOps) WriteFileAtomic(path string, data []byte, perm fs.FileMode) error {
 	if err := m.fsys.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err

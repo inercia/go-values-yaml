@@ -37,8 +37,8 @@ type fileOps interface {
 
 type osFileOps struct{}
 
-func (osFileOps) Stat(name string) (fs.FileInfo, error)                 { return os.Stat(name) }
-func (osFileOps) ReadFile(name string) ([]byte, error)                  { return os.ReadFile(filepath.Clean(name)) }
+func (osFileOps) Stat(name string) (fs.FileInfo, error) { return os.Stat(name) }
+func (osFileOps) ReadFile(name string) ([]byte, error)  { return os.ReadFile(filepath.Clean(name)) }
 func (osFileOps) WriteFileAtomic(path string, data []byte, perm fs.FileMode) error {
 	return writeFileAtomic(path, data, perm)
 }
@@ -206,6 +206,9 @@ func ExtractCommonN(paths []string, opts ...Option) (commonPath string, err erro
 //     produce/overwrite the parent values.yaml and update children with remainders.
 //   - Newly created parent values.yaml files make that parent eligible in the next pass
 //     to be grouped with its own siblings at a higher level.
+//   - If a parent has fewer than two direct child values.yaml but has two or more
+//     descendant values.yaml anywhere in its subtree, compute the common across all
+//     those descendants and write it at the parent, subtracting it from all descendants.
 //
 // - Stops when a full pass creates no new parent values.yaml files.
 //
@@ -281,17 +284,72 @@ func ExtractCommonRecursive(root string, opts ...Option) ([]string, error) {
 					}
 				}
 			}
-			if len(paths) < 2 {
+			if len(paths) >= 2 {
+				commonPath, err := ExtractCommonN(paths, opts...)
+				if err != nil {
+					if errors.Is(err, ErrNoCommon) {
+						continue
+					}
+					return nil, err
+				}
+				// Mark parent as now having a values file (if not already)
+				if !hasValues[parent] {
+					hasValues[parent] = true
+					createdInPass++
+				}
+				createdSet[commonPath] = struct{}{}
 				continue
 			}
-			commonPath, err := ExtractCommonN(paths, opts...)
-			if err != nil {
-				if errors.Is(err, ErrNoCommon) {
-					continue
+
+			// Fallback: if fewer than two direct child values.yaml, check for two or more
+			// descendant values.yaml anywhere under this parent. If found, compute a common
+			// across all descendants and write it at the parent.
+			descendantValueFiles := make([]string, 0)
+			stack := append([]string{}, children...)
+			for len(stack) > 0 {
+				cur := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				if hasValues[cur] {
+					vp := filepath.Join(cur, "values.yaml")
+					if fi, err := options.fs.Stat(vp); err == nil && !fi.IsDir() {
+						descendantValueFiles = append(descendantValueFiles, vp)
+					}
 				}
+				if kids, ok := parentToChildren[cur]; ok {
+					stack = append(stack, kids...)
+				}
+			}
+			if len(descendantValueFiles) < 2 {
+				continue
+			}
+
+			// Read all descendant YAMLs
+			yams := make([][]byte, len(descendantValueFiles))
+			for i, p := range descendantValueFiles {
+				b, err := options.fs.ReadFile(p)
+				if err != nil {
+					return nil, err
+				}
+				yams[i] = b
+			}
+
+			commonY, remainders, err := yamllib.ExtractCommonN(yams, yamllib.WithIncludeEqualListsInCommon(options.IncludeEqualListsInCommon))
+			if err != nil {
 				return nil, err
 			}
-			// Mark parent as now having a values file (if not already)
+			if isEmptyYAML(commonY) {
+				continue
+			}
+
+			commonPath := filepath.Join(parent, "values.yaml")
+			if err := options.fs.WriteFileAtomic(commonPath, commonY, 0o644); err != nil {
+				return nil, err
+			}
+			for i, p := range descendantValueFiles {
+				if err := options.fs.WriteFileAtomic(p, remainders[i], 0o644); err != nil {
+					return nil, err
+				}
+			}
 			if !hasValues[parent] {
 				hasValues[parent] = true
 				createdInPass++
