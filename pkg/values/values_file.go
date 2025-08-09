@@ -16,12 +16,33 @@ import (
 var ErrNoCommon = errors.New("no common values found")
 
 // Options controls how common structures are extracted for values.yaml files.
-// Currently it wraps the YAML-level options used by pkg/yaml.
+// Currently it wraps the YAML-level options used by pkg/yaml and the filesystem
+// operations used for reading/writing files.
 type Options struct {
 	// IncludeEqualListsInCommon controls whether lists that are equal across both
 	// values files should be extracted into the common file. Default true.
 	IncludeEqualListsInCommon bool
+
+	// fs provides filesystem operations; defaults to the OS filesystem.
+	fs fileOps
 }
+
+// fileOps abstracts the minimal filesystem operations needed by this package.
+type fileOps interface {
+	Stat(name string) (fs.FileInfo, error)
+	ReadFile(name string) ([]byte, error)
+	WriteFileAtomic(path string, data []byte, perm fs.FileMode) error
+	WalkDir(root string, fn fs.WalkDirFunc) error
+}
+
+type osFileOps struct{}
+
+func (osFileOps) Stat(name string) (fs.FileInfo, error)                 { return os.Stat(name) }
+func (osFileOps) ReadFile(name string) ([]byte, error)                  { return os.ReadFile(filepath.Clean(name)) }
+func (osFileOps) WriteFileAtomic(path string, data []byte, perm fs.FileMode) error {
+	return writeFileAtomic(path, data, perm)
+}
+func (osFileOps) WalkDir(root string, fn fs.WalkDirFunc) error { return filepath.WalkDir(root, fn) }
 
 // Option is a functional option for file-based extraction.
 type Option func(*Options)
@@ -31,8 +52,13 @@ func WithIncludeEqualListsInCommon(include bool) Option {
 	return func(o *Options) { o.IncludeEqualListsInCommon = include }
 }
 
+// WithFileOps allows injecting custom filesystem operations (e.g., memfs for tests).
+func WithFileOps(fops fileOps) Option {
+	return func(o *Options) { o.fs = fops }
+}
+
 func defaultOptions() Options {
-	return Options{IncludeEqualListsInCommon: true}
+	return Options{IncludeEqualListsInCommon: true, fs: osFileOps{}}
 }
 
 // ExtractCommon reads two values.yaml files and extracts their common structure into
@@ -54,10 +80,10 @@ func ExtractCommon(path1, path2 string, opts ...Option) (commonPath string, err 
 	if filepath.Base(path1) != "values.yaml" || filepath.Base(path2) != "values.yaml" {
 		return "", fmt.Errorf("both files must be named values.yaml: got %q and %q", filepath.Base(path1), filepath.Base(path2))
 	}
-	if err := assertFileExists(path1); err != nil {
+	if err := assertFileExists(options.fs, path1); err != nil {
 		return "", err
 	}
-	if err := assertFileExists(path2); err != nil {
+	if err := assertFileExists(options.fs, path2); err != nil {
 		return "", err
 	}
 
@@ -70,11 +96,11 @@ func ExtractCommon(path1, path2 string, opts ...Option) (commonPath string, err 
 	}
 
 	// Read YAML files
-	y1, err := os.ReadFile(filepath.Clean(path1))
+	y1, err := options.fs.ReadFile(path1)
 	if err != nil {
 		return "", err
 	}
-	y2, err := os.ReadFile(filepath.Clean(path2))
+	y2, err := options.fs.ReadFile(path2)
 	if err != nil {
 		return "", err
 	}
@@ -92,13 +118,13 @@ func ExtractCommon(path1, path2 string, opts ...Option) (commonPath string, err 
 
 	// Write common and updated files atomically
 	commonPath = filepath.Join(p1, "values.yaml")
-	if err := writeFileAtomic(commonPath, commonY, 0o644); err != nil {
+	if err := options.fs.WriteFileAtomic(commonPath, commonY, 0o644); err != nil {
 		return "", err
 	}
-	if err := writeFileAtomic(path1, u1Y, 0o644); err != nil {
+	if err := options.fs.WriteFileAtomic(path1, u1Y, 0o644); err != nil {
 		return "", err
 	}
-	if err := writeFileAtomic(path2, u2Y, 0o644); err != nil {
+	if err := options.fs.WriteFileAtomic(path2, u2Y, 0o644); err != nil {
 		return "", err
 	}
 
@@ -123,7 +149,7 @@ func ExtractCommonN(paths []string, opts ...Option) (commonPath string, err erro
 		if filepath.Base(p) != "values.yaml" {
 			return "", fmt.Errorf("file must be named values.yaml: %s", p)
 		}
-		if err := assertFileExists(p); err != nil {
+		if err := assertFileExists(options.fs, p); err != nil {
 			return "", err
 		}
 		parents[filepath.Dir(filepath.Dir(p))] = struct{}{}
@@ -139,7 +165,7 @@ func ExtractCommonN(paths []string, opts ...Option) (commonPath string, err erro
 	// Read content
 	yams := make([][]byte, len(paths))
 	for i, p := range paths {
-		b, err := os.ReadFile(filepath.Clean(p))
+		b, err := options.fs.ReadFile(p)
 		if err != nil {
 			return "", err
 		}
@@ -157,11 +183,11 @@ func ExtractCommonN(paths []string, opts ...Option) (commonPath string, err erro
 
 	// Write outputs
 	commonPath = filepath.Join(parent, "values.yaml")
-	if err := writeFileAtomic(commonPath, commonY, 0o644); err != nil {
+	if err := options.fs.WriteFileAtomic(commonPath, commonY, 0o644); err != nil {
 		return "", err
 	}
 	for i, p := range paths {
-		if err := writeFileAtomic(p, remainders[i], 0o644); err != nil {
+		if err := options.fs.WriteFileAtomic(p, remainders[i], 0o644); err != nil {
 			return "", err
 		}
 	}
@@ -185,8 +211,14 @@ func ExtractCommonN(paths []string, opts ...Option) (commonPath string, err erro
 //
 // Returns the sorted list of parent values.yaml paths that were created during the run.
 func ExtractCommonRecursive(root string, opts ...Option) ([]string, error) {
+	// Build options with default FS
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	// Validate root
-	st, err := os.Stat(root)
+	st, err := options.fs.Stat(root)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +229,7 @@ func ExtractCommonRecursive(root string, opts ...Option) ([]string, error) {
 	// Discover directories and parent->children relationships
 	dirs := make(map[string]struct{})
 	parentToChildren := make(map[string][]string)
-	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	if err := options.fs.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -217,7 +249,7 @@ func ExtractCommonRecursive(root string, opts ...Option) ([]string, error) {
 	// Track which directories currently have a values.yaml file
 	hasValues := make(map[string]bool)
 	for dir := range dirs {
-		if fi, err := os.Stat(filepath.Join(dir, "values.yaml")); err == nil && !fi.IsDir() {
+		if fi, err := options.fs.Stat(filepath.Join(dir, "values.yaml")); err == nil && !fi.IsDir() {
 			hasValues[dir] = true
 		}
 	}
@@ -244,7 +276,7 @@ func ExtractCommonRecursive(root string, opts ...Option) ([]string, error) {
 			for _, child := range children {
 				if hasValues[child] {
 					vp := filepath.Join(child, "values.yaml")
-					if fi, err := os.Stat(vp); err == nil && !fi.IsDir() {
+					if fi, err := options.fs.Stat(vp); err == nil && !fi.IsDir() {
 						paths = append(paths, vp)
 					}
 				}
@@ -294,8 +326,8 @@ func pathDepth(p string) int {
 	return depth
 }
 
-func assertFileExists(path string) error {
-	st, err := os.Stat(path)
+func assertFileExists(ops fileOps, path string) error {
+	st, err := ops.Stat(path)
 	if err != nil {
 		return err
 	}
