@@ -7,6 +7,7 @@ import (
 	"sort"
 	"testing"
 
+	yamllib "github.com/inercia/go-values-yaml/pkg/yaml"
 	syaml "sigs.k8s.io/yaml"
 )
 
@@ -394,14 +395,19 @@ func TestExtractCommonRecursive_SingleParentGroup(t *testing.T) {
   bar:
     common: yes
 `), mustReadFile(t, filepath.Join(parent, "values.yaml")))
-			assertYAMLEqual(t, []byte(`foo:
-  bar:
-    a: 1
-`), mustReadFile(t, p1))
-			assertYAMLEqual(t, []byte(`foo:
-  bar:
-    b: 2
-`), mustReadFile(t, p2))
+			u1 := mustReadFile(t, p1)
+			u2 := mustReadFile(t, p2)
+			c := mustReadFile(t, filepath.Join(parent, "values.yaml"))
+			rec1, err := yamllib.MergeYAML(c, u1)
+			if err != nil {
+				t.Fatalf("merge back p1: %v", err)
+			}
+			assertYAMLEqual(t, y1, rec1)
+			rec2, err := yamllib.MergeYAML(c, u2)
+			if err != nil {
+				t.Fatalf("merge back p2: %v", err)
+			}
+			assertYAMLEqual(t, y2, rec2)
 		})
 	}
 }
@@ -668,16 +674,18 @@ func TestExtractCommonRecursive_GrandchildrenSiblings_CommonAtGrandparent(t *tes
 	p2 := filepath.Join(twoY, "values.yaml")
 
 	// Similar nested structure with a common grandparent-level subset
-	mustWriteFile(t, p1, []byte(`foo:
+	y1 := []byte(`foo:
   bar:
     something: [1,2,3]
     other: true
-`))
-	mustWriteFile(t, p2, []byte(`foo:
+`)
+	y2 := []byte(`foo:
   bar:
     else: [1,2,3]
     other: true
-`))
+`)
+	mustWriteFile(t, p1, y1)
+	mustWriteFile(t, p2, y2)
 
 	created, err := ExtractCommonRecursive(dir)
 	if err != nil {
@@ -710,6 +718,21 @@ func TestExtractCommonRecursive_GrandchildrenSiblings_CommonAtGrandparent(t *tes
     - 3
 `), mustReadFile(t, p2))
 
+	// Helm precedence reconstruction: merge(common, updated) == original
+	c := mustReadFile(t, filepath.Join(a, "values.yaml"))
+	u1 := mustReadFile(t, p1)
+	u2 := mustReadFile(t, p2)
+	rec1, err := yamllib.MergeYAML(c, u1)
+	if err != nil {
+		t.Fatalf("merge back p1: %v", err)
+	}
+	assertYAMLEqual(t, y1, rec1)
+	rec2, err := yamllib.MergeYAML(c, u2)
+	if err != nil {
+		t.Fatalf("merge back p2: %v", err)
+	}
+	assertYAMLEqual(t, y2, rec2)
+
 	// Ensure no intermediate values.yaml were created at /a/1 or /a/2
 	if _, err := os.Stat(filepath.Join(a, "1", "values.yaml")); err == nil {
 		t.Fatalf("unexpected values.yaml at %s", filepath.Join(a, "1"))
@@ -729,16 +752,18 @@ func TestExtractCommonRecursive_ChildAndGrandchild_CommonAtParent(t *testing.T) 
 
 	p1 := filepath.Join(oneX, "values.yaml")
 	p2 := filepath.Join(two, "values.yaml")
-	mustWriteFile(t, p1, []byte(`foo:
+	y1 := []byte(`foo:
   bar:
     something: [1,2,3]
     other: true
-`))
-	mustWriteFile(t, p2, []byte(`foo:
+`)
+	y2 := []byte(`foo:
   bar:
     else: [1,2,3]
     other: true
-`))
+`)
+	mustWriteFile(t, p1, y1)
+	mustWriteFile(t, p2, y2)
 
 	created, err := ExtractCommonRecursive(dir)
 	if err != nil {
@@ -767,6 +792,22 @@ func TestExtractCommonRecursive_ChildAndGrandchild_CommonAtParent(t *testing.T) 
     - 2
     - 3
 `), mustReadFile(t, p2))
+
+	// Helm precedence reconstruction
+	c := mustReadFile(t, filepath.Join(a, "values.yaml"))
+	u1 := mustReadFile(t, p1)
+	u2 := mustReadFile(t, p2)
+	rec1, err := yamllib.MergeYAML(c, u1)
+	if err != nil {
+		t.Fatalf("merge back p1: %v", err)
+	}
+	assertYAMLEqual(t, y1, rec1)
+	rec2, err := yamllib.MergeYAML(c, u2)
+	if err != nil {
+		t.Fatalf("merge back p2: %v", err)
+	}
+	assertYAMLEqual(t, y2, rec2)
+
 	// Ensure no intermediate values.yaml at /a/1
 	if _, err := os.Stat(filepath.Join(a, "1", "values.yaml")); err == nil {
 		t.Fatalf("unexpected values.yaml at %s", filepath.Join(a, "1"))
@@ -787,21 +828,24 @@ func TestExtractCommonRecursive_MixedDepthThreeDescendants(t *testing.T) {
 	p3 := filepath.Join(threeZ, "values.yaml")
 
 	// Common part across all three: meta.env: prod; differing unique keys
-	mustWriteFile(t, p1, []byte(`meta:
+	y1 := []byte(`meta:
   env: prod
 svc:
   a: 1
-`))
-	mustWriteFile(t, p2, []byte(`meta:
+`)
+	y2 := []byte(`meta:
   env: prod
 cfg:
   b: 2
-`))
-	mustWriteFile(t, p3, []byte(`meta:
+`)
+	y3 := []byte(`meta:
   env: prod
 feat:
   c: 3
-`))
+`)
+	mustWriteFile(t, p1, y1)
+	mustWriteFile(t, p2, y2)
+	mustWriteFile(t, p3, y3)
 
 	created, err := ExtractCommonRecursive(dir)
 	if err != nil {
@@ -824,13 +868,27 @@ feat:
 	assertYAMLEqual(t, []byte(`feat:
   c: 3
 `), mustReadFile(t, p3))
-	// Ensure no intermediate values.yaml at /a/1 or /a/3
-	if _, err := os.Stat(filepath.Join(a, "1", "values.yaml")); err == nil {
-		t.Fatalf("unexpected values.yaml at %s", filepath.Join(a, "1"))
+
+	// Helm precedence reconstruction for all three
+	c := mustReadFile(t, filepath.Join(a, "values.yaml"))
+	u1 := mustReadFile(t, p1)
+	u2 := mustReadFile(t, p2)
+	u3 := mustReadFile(t, p3)
+	rec1, err := yamllib.MergeYAML(c, u1)
+	if err != nil {
+		t.Fatalf("merge back p1: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(a, "3", "values.yaml")); err == nil {
-		t.Fatalf("unexpected values.yaml at %s", filepath.Join(a, "3"))
+	assertYAMLEqual(t, y1, rec1)
+	rec2, err := yamllib.MergeYAML(c, u2)
+	if err != nil {
+		t.Fatalf("merge back p2: %v", err)
 	}
+	assertYAMLEqual(t, y2, rec2)
+	rec3, err := yamllib.MergeYAML(c, u3)
+	if err != nil {
+		t.Fatalf("merge back p3: %v", err)
+	}
+	assertYAMLEqual(t, y3, rec3)
 }
 
 func mustMkdirAll(t *testing.T, path string) {

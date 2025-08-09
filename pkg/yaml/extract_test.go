@@ -60,11 +60,11 @@ foo:
 			assertYAMLEqual(t, tc.wantUpdated1, u1)
 			assertYAMLEqual(t, tc.wantUpdated2, u2)
 
-			m1, err := MergeYAML(u1, common)
+			m1, err := MergeYAML(common, u1)
 			if err != nil {
 				t.Fatalf("MergeYAML m1 error: %v", err)
 			}
-			m2, err := MergeYAML(u2, common)
+			m2, err := MergeYAML(common, u2)
 			if err != nil {
 				t.Fatalf("MergeYAML m2 error: %v", err)
 			}
@@ -134,11 +134,11 @@ func TestExtractCommon_ListsEqual_NotInCommon_WithOption(t *testing.T) {
 			assertYAMLEqual(t, tc.wantU1, u1)
 			assertYAMLEqual(t, tc.wantU2, u2)
 
-			m1, err := MergeYAML(u1, common)
+			m1, err := MergeYAML(common, u1)
 			if err != nil {
 				t.Fatalf("MergeYAML m1 error: %v", err)
 			}
-			m2, err := MergeYAML(u2, common)
+			m2, err := MergeYAML(common, u2)
 			if err != nil {
 				t.Fatalf("MergeYAML m2 error: %v", err)
 			}
@@ -226,11 +226,11 @@ parent:
 			}
 			assertYAMLEqual(t, tc.wantCommon, common)
 
-			m1, err := MergeYAML(u1, common)
+			m1, err := MergeYAML(common, u1)
 			if err != nil {
 				t.Fatal(err)
 			}
-			m2, err := MergeYAML(u2, common)
+			m2, err := MergeYAML(common, u2)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -396,7 +396,7 @@ func TestExtractCommonN_ThreeDocs_CommonAndRemainders(t *testing.T) {
 			}
 			for i := range rems {
 				assertYAMLEqual(t, tc.wantRemainders[i], rems[i])
-				m, _ := MergeYAML(rems[i], common)
+				m, _ := MergeYAML(common, rems[i])
 				assertYAMLEqual(t, tc.inputs[i], m)
 			}
 		})

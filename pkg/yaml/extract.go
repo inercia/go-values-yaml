@@ -1,7 +1,6 @@
 package yaml
 
 import (
-	"errors"
 	"reflect"
 
 	syaml "sigs.k8s.io/yaml"
@@ -383,9 +382,10 @@ func normalizeDocRoot(v any) any {
 	return v
 }
 
-// MergeYAML merges two YAML documents in-memory by deep-merging their structures
-// with a "first wins on conflict" policy. This is primarily intended for tests
-// to validate that merge(updated, common) equals original.
+// MergeYAML merges two YAML documents in-memory by deep-merging maps and applying
+// a "last wins on conflict" policy (Helm-style). Lists and scalars are replaced
+// by the overlay. Intended for tests to validate that merge(common, remainder)
+// reconstructs the original.
 func MergeYAML(baseYAML, overlayYAML []byte) ([]byte, error) {
 	var base any
 	var overlay any
@@ -404,11 +404,11 @@ func MergeYAML(baseYAML, overlayYAML []byte) ([]byte, error) {
 }
 
 func mergeValues(a, b any) (any, error) {
-	if a == nil {
-		return b, nil
-	}
+	// Helm-style semantics: last (overlay) wins for scalars, lists, and type conflicts;
+	// maps are deep-merged recursively.
 	if b == nil {
-		return a, nil
+		// Explicit null in overlay should nullify the value
+		return nil, nil
 	}
 	if am, ok := a.(map[string]any); ok {
 		if bm, ok := b.(map[string]any); ok {
@@ -429,9 +429,9 @@ func mergeValues(a, b any) (any, error) {
 			}
 			return out, nil
 		}
-		return nil, errors.New("type conflict: map vs non-map")
+		// Type conflict: overlay replaces
+		return b, nil
 	}
-	// For lists and scalars, prefer the first (base) value to preserve updated
-	// semantics and avoid unintended replacements.
-	return a, nil
+	// Non-map values: overlay replaces base (including lists and scalars)
+	return b, nil
 }

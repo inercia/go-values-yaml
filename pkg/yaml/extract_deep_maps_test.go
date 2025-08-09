@@ -68,11 +68,11 @@ root:
 			assertYAMLEqualDeep(t, tc.wantU1, u1)
 			assertYAMLEqualDeep(t, tc.wantU2, u2)
 
-			m1, err := MergeYAML(u1, common)
+			m1, err := MergeYAML(common, u1)
 			if err != nil {
 				t.Fatalf("MergeYAML m1 error: %v", err)
 			}
-			m2, err := MergeYAML(u2, common)
+			m2, err := MergeYAML(common, u2)
 			if err != nil {
 				t.Fatalf("MergeYAML m2 error: %v", err)
 			}
@@ -163,7 +163,7 @@ func TestExtractCommonN_DeepNestedMaps_OrderInsensitive(t *testing.T) {
 			assertYAMLEqualDeep(t, tc.wantCommon, common)
 			for i := range rems {
 				assertYAMLEqualDeep(t, tc.wantRemainders[i], rems[i])
-				m, err := MergeYAML(rems[i], common)
+				m, err := MergeYAML(common, rems[i])
 				if err != nil {
 					t.Fatalf("merge %d: %v", i, err)
 				}
