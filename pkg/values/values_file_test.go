@@ -639,6 +639,120 @@ func TestExtractCommonRecursive_GrandchildrenSiblings_CommonAtGrandparent(t *tes
 	}
 }
 
+func TestExtractCommonRecursive_ChildAndGrandchild_CommonAtParent(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a")
+	oneX := filepath.Join(a, "1", "X")
+	two := filepath.Join(a, "2")
+	mustMkdirAll(t, oneX)
+	mustMkdirAll(t, two)
+
+	p1 := filepath.Join(oneX, "values.yaml")
+	p2 := filepath.Join(two, "values.yaml")
+	mustWriteFile(t, p1, []byte(`foo:
+  bar:
+    something: [1,2,3]
+    other: true
+`))
+	mustWriteFile(t, p2, []byte(`foo:
+  bar:
+    else: [1,2,3]
+    other: true
+`))
+
+	created, err := ExtractCommonRecursive(dir)
+	if err != nil {
+		t.Fatalf("ExtractCommonRecursive error: %v", err)
+	}
+	// Expect /a/values.yaml only
+	expect := []string{filepath.Join(a, "values.yaml")}
+	if !reflect.DeepEqual(expect, created) {
+		t.Fatalf("unexpected created: %v", created)
+	}
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    other: true
+`), mustReadFile(t, filepath.Join(a, "values.yaml")))
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    something:
+    - 1
+    - 2
+    - 3
+`), mustReadFile(t, p1))
+	assertYAMLEqual(t, []byte(`foo:
+  bar:
+    else:
+    - 1
+    - 2
+    - 3
+`), mustReadFile(t, p2))
+	// Ensure no intermediate values.yaml at /a/1
+	if _, err := os.Stat(filepath.Join(a, "1", "values.yaml")); err == nil {
+		t.Fatalf("unexpected values.yaml at %s", filepath.Join(a, "1"))
+	}
+}
+
+func TestExtractCommonRecursive_MixedDepthThreeDescendants(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a")
+	oneX := filepath.Join(a, "1", "X")
+	two := filepath.Join(a, "2")
+	threeZ := filepath.Join(a, "3", "Z")
+	for _, d := range []string{oneX, two, threeZ} {
+		mustMkdirAll(t, d)
+	}
+	p1 := filepath.Join(oneX, "values.yaml")
+	p2 := filepath.Join(two, "values.yaml")
+	p3 := filepath.Join(threeZ, "values.yaml")
+
+	// Common part across all three: meta.env: prod; differing unique keys
+	mustWriteFile(t, p1, []byte(`meta:
+  env: prod
+svc:
+  a: 1
+`))
+	mustWriteFile(t, p2, []byte(`meta:
+  env: prod
+cfg:
+  b: 2
+`))
+	mustWriteFile(t, p3, []byte(`meta:
+  env: prod
+feat:
+  c: 3
+`))
+
+	created, err := ExtractCommonRecursive(dir)
+	if err != nil {
+		t.Fatalf("ExtractCommonRecursive error: %v", err)
+	}
+	// Expect /a/values.yaml only
+	expect := []string{filepath.Join(a, "values.yaml")}
+	if !reflect.DeepEqual(expect, created) {
+		t.Fatalf("unexpected created: %v", created)
+	}
+	assertYAMLEqual(t, []byte(`meta:
+  env: prod
+`), mustReadFile(t, filepath.Join(a, "values.yaml")))
+	assertYAMLEqual(t, []byte(`svc:
+  a: 1
+`), mustReadFile(t, p1))
+	assertYAMLEqual(t, []byte(`cfg:
+  b: 2
+`), mustReadFile(t, p2))
+	assertYAMLEqual(t, []byte(`feat:
+  c: 3
+`), mustReadFile(t, p3))
+	// Ensure no intermediate values.yaml at /a/1 or /a/3
+	if _, err := os.Stat(filepath.Join(a, "1", "values.yaml")); err == nil {
+		t.Fatalf("unexpected values.yaml at %s", filepath.Join(a, "1"))
+	}
+	if _, err := os.Stat(filepath.Join(a, "3", "values.yaml")); err == nil {
+		t.Fatalf("unexpected values.yaml at %s", filepath.Join(a, "3"))
+	}
+}
+
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o750); err != nil {
