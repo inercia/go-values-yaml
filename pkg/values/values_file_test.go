@@ -272,35 +272,48 @@ func TestExtractCommon_NotSiblings_Error(t *testing.T) {
 }
 
 func TestExtractCommon_ParentUnwritable_ErrorNoChanges(t *testing.T) {
-	dir := t.TempDir()
-	parent := filepath.Join(dir, "parent")
-	x := filepath.Join(parent, "x")
-	y := filepath.Join(parent, "y")
-	mustMkdirAll(t, x)
-	mustMkdirAll(t, y)
-	p1 := filepath.Join(x, "values.yaml")
-	p2 := filepath.Join(y, "values.yaml")
-	orig1 := []byte("a: 1\n")
-	orig2 := []byte("a: 1\n")
-	mustWriteFile(t, p1, orig1)
-	mustWriteFile(t, p2, orig2)
-
-	// Make parent read-only to block common file creation
-	if err := os.Chmod(parent, 0o555); err != nil { //nolint:gosec // tests intentionally set directory perms
-		t.Skipf("chmod failed, skipping: %v", err)
+	tests := []struct {
+		name   string
+		leftY  []byte
+		rightY []byte
+	}{
+		{
+			name:   "parent unwritable -> error and no changes",
+			leftY:  []byte("a: 1\n"),
+			rightY: []byte("a: 1\n"),
+		},
 	}
-	defer func() { _ = os.Chmod(parent, 0o750) }() //nolint:gosec // restoring directory perms for tests
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			parent := filepath.Join(dir, "parent")
+			x := filepath.Join(parent, "x")
+			y := filepath.Join(parent, "y")
+			mustMkdirAll(t, x)
+			mustMkdirAll(t, y)
+			p1 := filepath.Join(x, "values.yaml")
+			p2 := filepath.Join(y, "values.yaml")
+			mustWriteFile(t, p1, tc.leftY)
+			mustWriteFile(t, p2, tc.rightY)
 
-	_, err := ExtractCommon(p1, p2)
-	if err == nil {
-		t.Fatalf("expected error due to unwritable parent, got nil")
-	}
-	// Ensure children unchanged
-	assertYAMLEqual(t, orig1, mustReadFile(t, p1))
-	assertYAMLEqual(t, orig2, mustReadFile(t, p2))
-	// Ensure no common file exists
-	if _, err := os.Stat(filepath.Join(parent, "values.yaml")); err == nil {
-		t.Fatalf("unexpected common file created in unwritable parent")
+			// Make parent read-only to block common file creation
+			if err := os.Chmod(parent, 0o555); err != nil { //nolint:gosec // tests intentionally set directory perms
+				t.Skipf("chmod failed, skipping: %v", err)
+			}
+			defer func() { _ = os.Chmod(parent, 0o750) }() //nolint:gosec // restoring directory perms for tests
+
+			_, err := ExtractCommon(p1, p2)
+			if err == nil {
+				t.Fatalf("expected error due to unwritable parent, got nil")
+			}
+			// Ensure children unchanged
+			assertYAMLEqual(t, tc.leftY, mustReadFile(t, p1))
+			assertYAMLEqual(t, tc.rightY, mustReadFile(t, p2))
+			// Ensure no common file exists
+			if _, err := os.Stat(filepath.Join(parent, "values.yaml")); err == nil {
+				t.Fatalf("unexpected common file created in unwritable parent")
+			}
+		})
 	}
 }
 
@@ -376,110 +389,126 @@ func TestExtractCommonN_ParentUnwritable_ErrorNoChanges(t *testing.T) {
 }
 
 func TestExtractCommonRecursive_SingleParentGroup(t *testing.T) {
-	dir := t.TempDir()
-	parent := filepath.Join(dir, "apps")
-	d1 := filepath.Join(parent, "svc-a")
-	d2 := filepath.Join(parent, "svc-b")
-	mustMkdirAll(t, d1)
-	mustMkdirAll(t, d2)
+	tests := []struct {
+		name string
+	}{
+		{name: "sibling children with shared subset -> parent values.yaml created"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			parent := filepath.Join(dir, "apps")
+			d1 := filepath.Join(parent, "svc-a")
+			d2 := filepath.Join(parent, "svc-b")
+			mustMkdirAll(t, d1)
+			mustMkdirAll(t, d2)
 
-	p1 := filepath.Join(d1, "values.yaml")
-	p2 := filepath.Join(d2, "values.yaml")
+			p1 := filepath.Join(d1, "values.yaml")
+			p2 := filepath.Join(d2, "values.yaml")
 
-	y1 := []byte(`foo:
+			y1 := []byte(`foo:
   bar:
     a: 1
     common: yes
 `)
-	y2 := []byte(`foo:
+			y2 := []byte(`foo:
   bar:
     b: 2
     common: yes
 `)
-	mustWriteFile(t, p1, y1)
-	mustWriteFile(t, p2, y2)
+			mustWriteFile(t, p1, y1)
+			mustWriteFile(t, p2, y2)
 
-	created, err := ExtractCommonRecursive(dir)
-	if err != nil {
-		t.Fatalf("ExtractCommonRecursive error: %v", err)
-	}
-	expectCreated := []string{filepath.Join(parent, "values.yaml")}
-	if !reflect.DeepEqual(expectCreated, created) {
-		t.Fatalf("unexpected created list: %v", created)
-	}
+			created, err := ExtractCommonRecursive(dir)
+			if err != nil {
+				t.Fatalf("ExtractCommonRecursive error: %v", err)
+			}
+			expectCreated := []string{filepath.Join(parent, "values.yaml")}
+			if !reflect.DeepEqual(expectCreated, created) {
+				t.Fatalf("unexpected created list: %v", created)
+			}
 
-	assertYAMLEqual(t, []byte(`foo:
+			assertYAMLEqual(t, []byte(`foo:
   bar:
     common: yes
 `), mustReadFile(t, filepath.Join(parent, "values.yaml")))
-	assertYAMLEqual(t, []byte(`foo:
+			assertYAMLEqual(t, []byte(`foo:
   bar:
     a: 1
 `), mustReadFile(t, p1))
-	assertYAMLEqual(t, []byte(`foo:
+			assertYAMLEqual(t, []byte(`foo:
   bar:
     b: 2
 `), mustReadFile(t, p2))
+		})
+	}
 }
 
 func TestExtractCommonRecursive_MultipleParents(t *testing.T) {
-	dir := t.TempDir()
-	b := filepath.Join(dir, "env", "prod")
-	c := filepath.Join(dir, "env", "staging")
-	b1 := filepath.Join(b, "app1")
-	b2 := filepath.Join(b, "app2")
-	c1 := filepath.Join(c, "app3")
-	c2 := filepath.Join(c, "app4")
-	mustMkdirAll(t, b1)
-	mustMkdirAll(t, b2)
-	mustMkdirAll(t, c1)
-	mustMkdirAll(t, c2)
+	tests := []struct{ name string }{
+		{name: "multiple groups under env -> per-group parents created"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			b := filepath.Join(dir, "env", "prod")
+			c := filepath.Join(dir, "env", "staging")
+			b1 := filepath.Join(b, "app1")
+			b2 := filepath.Join(b, "app2")
+			c1 := filepath.Join(c, "app3")
+			c2 := filepath.Join(c, "app4")
+			mustMkdirAll(t, b1)
+			mustMkdirAll(t, b2)
+			mustMkdirAll(t, c1)
+			mustMkdirAll(t, c2)
 
-	mustWriteFile(t, filepath.Join(b1, "values.yaml"), []byte(`cfg:
+			mustWriteFile(t, filepath.Join(b1, "values.yaml"), []byte(`cfg:
   image: v1
   replicas: 2
 `))
-	mustWriteFile(t, filepath.Join(b2, "values.yaml"), []byte(`cfg:
+			mustWriteFile(t, filepath.Join(b2, "values.yaml"), []byte(`cfg:
   image: v1
   replicas: 3
 `))
-	mustWriteFile(t, filepath.Join(c1, "values.yaml"), []byte(`cfg:
+			mustWriteFile(t, filepath.Join(c1, "values.yaml"), []byte(`cfg:
   image: v2
   replicas: 5
 `))
-	mustWriteFile(t, filepath.Join(c2, "values.yaml"), []byte(`cfg:
+			mustWriteFile(t, filepath.Join(c2, "values.yaml"), []byte(`cfg:
   image: v2
   replicas: 1
 `))
 
-	created, err := ExtractCommonRecursive(dir)
-	if err != nil {
-		t.Fatalf("ExtractCommonRecursive error: %v", err)
-	}
-	expect := []string{filepath.Join(b, "values.yaml"), filepath.Join(c, "values.yaml")}
-	if !reflect.DeepEqual(expect, created) {
-		t.Fatalf("unexpected created: %v", created)
-	}
+			created, err := ExtractCommonRecursive(dir)
+			if err != nil {
+				t.Fatalf("ExtractCommonRecursive error: %v", err)
+			}
+			expect := []string{filepath.Join(b, "values.yaml"), filepath.Join(c, "values.yaml")}
+			if !reflect.DeepEqual(expect, created) {
+				t.Fatalf("unexpected created: %v", created)
+			}
 
-	assertYAMLEqual(t, []byte(`cfg:
+			assertYAMLEqual(t, []byte(`cfg:
   image: v1
 `), mustReadFile(t, filepath.Join(b, "values.yaml")))
-	assertYAMLEqual(t, []byte(`cfg:
+			assertYAMLEqual(t, []byte(`cfg:
   replicas: 2
 `), mustReadFile(t, filepath.Join(b1, "values.yaml")))
-	assertYAMLEqual(t, []byte(`cfg:
+			assertYAMLEqual(t, []byte(`cfg:
   replicas: 3
 `), mustReadFile(t, filepath.Join(b2, "values.yaml")))
 
-	assertYAMLEqual(t, []byte(`cfg:
+			assertYAMLEqual(t, []byte(`cfg:
   image: v2
 `), mustReadFile(t, filepath.Join(c, "values.yaml")))
-	assertYAMLEqual(t, []byte(`cfg:
+			assertYAMLEqual(t, []byte(`cfg:
   replicas: 5
 `), mustReadFile(t, filepath.Join(c1, "values.yaml")))
-	assertYAMLEqual(t, []byte(`cfg:
+			assertYAMLEqual(t, []byte(`cfg:
   replicas: 1
 `), mustReadFile(t, filepath.Join(c2, "values.yaml")))
+		})
+	}
 }
 
 func TestExtractCommonRecursive_NoCommonGroup_Skip(t *testing.T) {

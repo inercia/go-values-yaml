@@ -25,30 +25,37 @@ func (m memfsOps) WriteFileAtomic(path string, data []byte, perm fs.FileMode) er
 }
 
 func TestExtractCommonRecursive_MemFS_DeepHierarchyMultiLevel(t *testing.T) {
-	mfs := memfs.New()
-	ops := memfsOps{fsys: mfs}
-	root := "root"
-
-	// Build a deep tree with two top-level environments, each with apps and tools groups
-	// Each group has two services with some shared config
-	paths := []string{
-		"root/org/prod/apps/api",
-		"root/org/prod/apps/web",
-		"root/org/prod/tools/monitor",
-		"root/org/prod/tools/backup",
-		"root/org/staging/apps/api",
-		"root/org/staging/apps/web",
-		"root/org/staging/tools/monitor",
-		"root/org/staging/tools/backup",
+	tests := []struct {
+		name string
+	}{
+		{
+			name: "recursive extraction across prod/staging/apps/tools -> multi-level commons",
+		},
 	}
-	for _, p := range paths {
-		if err := mfs.MkdirAll(p, 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mfs := memfs.New()
+			ops := memfsOps{fsys: mfs}
+			root := "root"
 
-	// prod/apps shared: service.port 80, team app; differing replicas
-	writeY(t, mfs, "root/org/prod/apps/api/values.yaml", []byte(`meta:
+			paths := []string{
+				"root/org/prod/apps/api",
+				"root/org/prod/apps/web",
+				"root/org/prod/tools/monitor",
+				"root/org/prod/tools/backup",
+				"root/org/staging/apps/api",
+				"root/org/staging/apps/web",
+				"root/org/staging/tools/monitor",
+				"root/org/staging/tools/backup",
+			}
+			for _, p := range paths {
+				if err := mfs.MkdirAll(p, 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+			}
+
+			// prod/apps
+			writeY(t, mfs, "root/org/prod/apps/api/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -58,7 +65,7 @@ svc:
   port: 80
   replicas: 2
 `))
-	writeY(t, mfs, "root/org/prod/apps/web/values.yaml", []byte(`meta:
+			writeY(t, mfs, "root/org/prod/apps/web/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -68,9 +75,8 @@ svc:
   port: 80
   replicas: 3
 `))
-
-	// prod/tools shared: ops team, monitoring on
-	writeY(t, mfs, "root/org/prod/tools/monitor/values.yaml", []byte(`meta:
+			// prod/tools
+			writeY(t, mfs, "root/org/prod/tools/monitor/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -80,7 +86,7 @@ ops:
   endpoints:
     - metrics
 `))
-	writeY(t, mfs, "root/org/prod/tools/backup/values.yaml", []byte(`meta:
+			writeY(t, mfs, "root/org/prod/tools/backup/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -90,9 +96,8 @@ ops:
   endpoints:
     - backups
 `))
-
-	// staging/apps shared: same as prod/apps but different images/replicas
-	writeY(t, mfs, "root/org/staging/apps/api/values.yaml", []byte(`meta:
+			// staging/apps
+			writeY(t, mfs, "root/org/staging/apps/api/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -102,7 +107,7 @@ svc:
   port: 80
   replicas: 1
 `))
-	writeY(t, mfs, "root/org/staging/apps/web/values.yaml", []byte(`meta:
+			writeY(t, mfs, "root/org/staging/apps/web/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -112,9 +117,8 @@ svc:
   port: 80
   replicas: 1
 `))
-
-	// staging/tools shared: ops team, monitoring on
-	writeY(t, mfs, "root/org/staging/tools/monitor/values.yaml", []byte(`meta:
+			// staging/tools
+			writeY(t, mfs, "root/org/staging/tools/monitor/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -124,7 +128,7 @@ ops:
   endpoints:
     - metrics
 `))
-	writeY(t, mfs, "root/org/staging/tools/backup/values.yaml", []byte(`meta:
+			writeY(t, mfs, "root/org/staging/tools/backup/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -135,124 +139,125 @@ ops:
     - backups
 `))
 
-	// Now run recursive extraction on memfs
-	created, err := ExtractCommonRecursive(filepath.Join(root, "org"), WithFileOps(ops))
-	if err != nil {
-		t.Fatalf("ExtractCommonRecursive error: %v", err)
-	}
+			created, err := ExtractCommonRecursive(filepath.Join(root, "org"), WithFileOps(ops))
+			if err != nil {
+				t.Fatalf("ExtractCommonRecursive error: %v", err)
+			}
+			expect := []string{
+				"root/org/prod/apps/values.yaml",
+				"root/org/prod/tools/values.yaml",
+				"root/org/staging/apps/values.yaml",
+				"root/org/staging/tools/values.yaml",
+				"root/org/prod/values.yaml",
+				"root/org/staging/values.yaml",
+				"root/org/values.yaml",
+			}
+			sort.Strings(expect)
+			if !reflect.DeepEqual(expect, created) {
+				t.Fatalf("unexpected created list:\nexpect: %v\n   got: %v", expect, created)
+			}
 
-	// Expect parents created at each apps/tools group under prod and staging, and at prod and staging themselves,
-	// and finally at org (top-level) because meta.company/policy.logs are common across prod and staging after consolidation.
-	expect := []string{
-		"root/org/prod/apps/values.yaml",
-		"root/org/prod/tools/values.yaml",
-		"root/org/staging/apps/values.yaml",
-		"root/org/staging/tools/values.yaml",
-		"root/org/prod/values.yaml",
-		"root/org/staging/values.yaml",
-		"root/org/values.yaml",
-	}
-	sort.Strings(expect)
-	if !reflect.DeepEqual(expect, created) {
-		t.Fatalf("unexpected created list:\nexpect: %v\n   got: %v", expect, created)
-	}
-
-	// Validate group-level commons for prod/apps (meta moved up to prod/org)
-	assertYAMLEqual(t, []byte(`svc:
+			assertYAMLEqual(t, []byte(`svc:
   team: app
   port: 80
 `), readY(t, mfs, "root/org/prod/apps/values.yaml"))
-	assertYAMLEqual(t, []byte(`svc:
+			assertYAMLEqual(t, []byte(`svc:
   image: api:v1
   replicas: 2
 `), readY(t, mfs, "root/org/prod/apps/api/values.yaml"))
-	assertYAMLEqual(t, []byte(`svc:
+			assertYAMLEqual(t, []byte(`svc:
   image: web:v1
   replicas: 3
 `), readY(t, mfs, "root/org/prod/apps/web/values.yaml"))
 
-	// Validate group-level commons for prod/tools (meta moved up to prod/org)
-	assertYAMLEqual(t, []byte(`ops:
+			assertYAMLEqual(t, []byte(`ops:
   team: ops
   monitoring: true
 `), readY(t, mfs, "root/org/prod/tools/values.yaml"))
-
-	// Validate prod-level after org-level consolidation: becomes empty
-	assertYAMLEqual(t, []byte(`{}
+			assertYAMLEqual(t, []byte(`{}
 `), readY(t, mfs, "root/org/prod/values.yaml"))
-
-	// Validate staging-level after org-level consolidation: becomes empty
-	assertYAMLEqual(t, []byte(`{}
+			assertYAMLEqual(t, []byte(`{}
 `), readY(t, mfs, "root/org/staging/values.yaml"))
-
-	// Validate top-level org common across prod and staging (meta)
-	assertYAMLEqual(t, []byte(`meta:
+			assertYAMLEqual(t, []byte(`meta:
   company: acme
   policy:
     logs: true
 `), readY(t, mfs, "root/org/values.yaml"))
+		})
+	}
 }
 
 func TestExtractCommonN_MemFS_EqualListsOption(t *testing.T) {
-	mfs := memfs.New()
-	ops := memfsOps{fsys: mfs}
-	root := "root/apps"
-	_ = mfs.MkdirAll("root/apps/a", 0o755)
-	_ = mfs.MkdirAll("root/apps/b", 0o755)
-	_ = mfs.MkdirAll("root/apps/c", 0o755)
-
-	writeY(t, mfs, "root/apps/a/values.yaml", []byte(`cfg:
-  list:
-    - x
-    - y
-`))
-	writeY(t, mfs, "root/apps/b/values.yaml", []byte(`cfg:
-  list:
-    - x
-    - y
-`))
-	writeY(t, mfs, "root/apps/c/values.yaml", []byte(`cfg:
-  list:
-    - x
-    - y
-`))
-
-	paths := []string{
-		"root/apps/a/values.yaml",
-		"root/apps/b/values.yaml",
-		"root/apps/c/values.yaml",
+	tests := []struct {
+		name           string
+		root           string
+		lists          [][]string
+		disableEqual   bool
+		wantCommonPath string
+		wantCommonYAML []byte
+		wantErr        error
+	}{
+		{
+			name:           "equal lists go to common by default",
+			root:           "root/apps",
+			lists:          [][]string{{"x", "y"}, {"x", "y"}, {"x", "y"}},
+			disableEqual:   false,
+			wantCommonPath: "root/apps/values.yaml",
+			wantCommonYAML: []byte("cfg:\n  list:\n    - x\n    - y\n"),
+			wantErr:        nil,
+		},
+		{
+			name:           "equal lists excluded -> ErrNoCommon and no common file",
+			root:           "grp",
+			lists:          [][]string{{"1", "2", "3"}, {"1", "2", "3"}},
+			disableEqual:   true,
+			wantCommonPath: "",
+			wantCommonYAML: nil,
+			wantErr:        ErrNoCommon,
+		},
 	}
-	// By default equal lists go to common
-	cp, err := ExtractCommonN(paths, WithFileOps(ops))
-	if err != nil {
-		t.Fatalf("ExtractCommonN error: %v", err)
-	}
-	if cp != filepath.Join(root, "values.yaml") {
-		t.Fatalf("unexpected common path: %s", cp)
-	}
-	assertYAMLEqual(t, []byte(`cfg:
-  list:
-    - x
-    - y
-`), readY(t, mfs, cp))
-
-	// When disabled, the list remains in each file and no common file should be created
-	mfs2 := memfs.New()
-	ops2 := memfsOps{fsys: mfs2}
-	_ = mfs2.MkdirAll("grp/a", 0o755)
-	_ = mfs2.MkdirAll("grp/b", 0o755)
-	writeY(t, mfs2, "grp/a/values.yaml", []byte(`cfg:
-  list: [1,2,3]
-`))
-	writeY(t, mfs2, "grp/b/values.yaml", []byte(`cfg:
-  list: [1,2,3]
-`))
-	_, err = ExtractCommonN([]string{"grp/a/values.yaml", "grp/b/values.yaml"}, WithFileOps(ops2), WithIncludeEqualListsInCommon(false))
-	if err == nil {
-		t.Fatalf("expected ErrNoCommon when equal lists excluded, got nil")
-	}
-	if err != ErrNoCommon {
-		t.Fatalf("expected ErrNoCommon, got %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mfs := memfs.New()
+			ops := memfsOps{fsys: mfs}
+			// setup paths
+			var paths []string
+			for i := range tc.lists {
+				p := filepath.Join(tc.root, string('a'+rune(i)), "values.yaml")
+				_ = mfs.MkdirAll(filepath.Dir(p), 0o755)
+				paths = append(paths, p)
+				// write YAML
+				if tc.root == "grp" {
+					// special case to match previous test expectations
+					writeY(t, mfs, p, []byte("cfg:\n  list: ["+tc.lists[i][0]+","+tc.lists[i][1]+","+tc.lists[i][2]+"]\n"))
+				} else {
+					writeY(t, mfs, p, []byte("cfg:\n  list:\n    - "+tc.lists[i][0]+"\n    - "+tc.lists[i][1]+"\n"))
+				}
+			}
+			// run
+			var cp string
+			var err error
+			if tc.disableEqual {
+				cp, err = ExtractCommonN(paths, WithFileOps(ops), WithIncludeEqualListsInCommon(false))
+			} else {
+				cp, err = ExtractCommonN(paths, WithFileOps(ops))
+			}
+			if tc.wantErr != nil {
+				if err == nil || err != tc.wantErr {
+					t.Fatalf("expected %v, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ExtractCommonN error: %v", err)
+			}
+			if tc.wantCommonPath != "" && cp != tc.wantCommonPath {
+				t.Fatalf("unexpected common path: %s", cp)
+			}
+			if tc.wantCommonYAML != nil {
+				assertYAMLEqual(t, tc.wantCommonYAML, readY(t, mfs, cp))
+			}
+		})
 	}
 }
 
