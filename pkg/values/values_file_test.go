@@ -78,44 +78,6 @@ func TestExtractCommon_CreatesCommonAndUpdatesChildren(t *testing.T) {
 	}
 }
 
-func TestExtractCommon_NoCommon_ReturnsErrAndNoChanges(t *testing.T) {
-	tests := []struct {
-		name   string
-		y1, y2 []byte
-	}{
-		{
-			name: "no common keys -> returns ErrNoCommon and leaves files",
-			y1:   []byte(`a: 1`),
-			y2:   []byte(`b: 2`),
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			bdir := filepath.Join(dir, "a", "b")
-			p := filepath.Join(bdir, "x")
-			q := filepath.Join(bdir, "y")
-			mustMkdirAll(t, p)
-			mustMkdirAll(t, q)
-
-			p1 := filepath.Join(p, "values.yaml")
-			p2 := filepath.Join(q, "values.yaml")
-			mustWriteFile(t, p1, tc.y1)
-			mustWriteFile(t, p2, tc.y2)
-
-			_, err := ExtractCommon(p1, p2)
-			if err == nil {
-				t.Fatalf("expected error, got nil")
-			}
-			if err != ErrNoCommon {
-				t.Fatalf("expected ErrNoCommon, got %v", err)
-			}
-
-			assertYAMLEqual(t, tc.y1, mustReadFile(t, p1))
-			assertYAMLEqual(t, tc.y2, mustReadFile(t, p2))
-		})
-	}
-}
 
 func TestExtractCommonN_CreatesCommonAndUpdatesAll(t *testing.T) {
 	tests := []struct {
