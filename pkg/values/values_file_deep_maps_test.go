@@ -8,17 +8,16 @@ import (
 )
 
 func TestExtractCommon_DeepNestedMaps_OrderInsensitive(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "grp")
-	a := filepath.Join(p, "a")
-	b := filepath.Join(p, "b")
-	mustMkdirAll(t, a)
-	mustMkdirAll(t, b)
-
-	p1 := filepath.Join(a, "values.yaml")
-	p2 := filepath.Join(b, "values.yaml")
-
-	y1 := []byte(`root:
+	tests := []struct {
+		name       string
+		y1, y2     []byte
+		wantCommon []byte
+		wantU1     []byte
+		wantU2     []byte
+	}{
+		{
+			name: "deep nested maps with order-insensitive equality",
+			y1: []byte(`root:
   x:
     shared:
       deep:
@@ -27,8 +26,8 @@ func TestExtractCommon_DeepNestedMaps_OrderInsensitive(t *testing.T) {
           beta: 2
   svc:
     image: a:v1
-`)
-	y2 := []byte(`root:
+`),
+			y2: []byte(`root:
   svc:
     image: b:v1
   x:
@@ -37,35 +36,51 @@ func TestExtractCommon_DeepNestedMaps_OrderInsensitive(t *testing.T) {
         inner:
           beta: 2
           alpha: 1
-`)
-
-	mustWriteFile(t, p1, y1)
-	mustWriteFile(t, p2, y2)
-
-	commonPath, err := ExtractCommon(p1, p2)
-	if err != nil {
-		t.Fatalf("ExtractCommon error: %v", err)
-	}
-	if commonPath != filepath.Join(p, "values.yaml") {
-		t.Fatalf("unexpected common path: %s", commonPath)
-	}
-
-	assertYAMLEqual(t, []byte(`root:
+`),
+			wantCommon: []byte(`root:
   x:
     shared:
       deep:
         inner:
           alpha: 1
           beta: 2
-`), mustReadFile(t, commonPath))
-	assertYAMLEqual(t, []byte(`root:
+`),
+			wantU1: []byte(`root:
   svc:
     image: a:v1
-`), mustReadFile(t, p1))
-	assertYAMLEqual(t, []byte(`root:
+`),
+			wantU2: []byte(`root:
   svc:
     image: b:v1
-`), mustReadFile(t, p2))
+`),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "grp")
+			a := filepath.Join(p, "a")
+			b := filepath.Join(p, "b")
+			mustMkdirAll(t, a)
+			mustMkdirAll(t, b)
+
+			p1 := filepath.Join(a, "values.yaml")
+			p2 := filepath.Join(b, "values.yaml")
+			mustWriteFile(t, p1, tc.y1)
+			mustWriteFile(t, p2, tc.y2)
+
+			commonPath, err := ExtractCommon(p1, p2)
+			if err != nil {
+				t.Fatalf("ExtractCommon error: %v", err)
+			}
+			if commonPath != filepath.Join(p, "values.yaml") {
+				t.Fatalf("unexpected common path: %s", commonPath)
+			}
+			assertYAMLEqual(t, tc.wantCommon, mustReadFile(t, commonPath))
+			assertYAMLEqual(t, tc.wantU1, mustReadFile(t, p1))
+			assertYAMLEqual(t, tc.wantU2, mustReadFile(t, p2))
+		})
+	}
 }
 
 func TestExtractCommonN_DeepNestedMaps_OrderInsensitive(t *testing.T) {

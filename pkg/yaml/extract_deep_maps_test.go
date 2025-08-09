@@ -7,7 +7,16 @@ import (
 )
 
 func TestExtractCommon_DeepNestedMaps_OrderInsensitive(t *testing.T) {
-	y1 := []byte(`
+	tests := []struct {
+		name       string
+		y1, y2     []byte
+		wantCommon []byte
+		wantU1     []byte
+		wantU2     []byte
+	}{
+		{
+			name: "order-insensitive deep map extraction",
+			y1: []byte(`
 root:
   a:
     shared:
@@ -17,8 +26,8 @@ root:
           beta: 2
     svc:
       image: a:v1
-`)
-	y2 := []byte(`
+`),
+			y2: []byte(`
 root:
   a:
     svc:
@@ -28,51 +37,62 @@ root:
         inner:
           beta: 2
           alpha: 1
-`)
-
-	common, u1, u2, err := ExtractCommon(y1, y2)
-	if err != nil {
-		t.Fatalf("ExtractCommon error: %v", err)
-	}
-
-	expectCommon := []byte(`root:
+`),
+			wantCommon: []byte(`root:
   a:
     shared:
       deep:
         inner:
           alpha: 1
           beta: 2
-`)
-	expectU1 := []byte(`root:
+`),
+			wantU1: []byte(`root:
   a:
     svc:
       image: a:v1
-`)
-	expectU2 := []byte(`root:
+`),
+			wantU2: []byte(`root:
   a:
     svc:
       image: b:v1
-`)
-
-	assertYAMLEqualDeep(t, expectCommon, common)
-	assertYAMLEqualDeep(t, expectU1, u1)
-	assertYAMLEqualDeep(t, expectU2, u2)
-
-	m1, err := MergeYAML(u1, common)
-	if err != nil {
-		t.Fatalf("MergeYAML m1 error: %v", err)
+`),
+		},
 	}
-	m2, err := MergeYAML(u2, common)
-	if err != nil {
-		t.Fatalf("MergeYAML m2 error: %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, u1, u2, err := ExtractCommon(tc.y1, tc.y2)
+			if err != nil {
+				t.Fatalf("ExtractCommon error: %v", err)
+			}
+			assertYAMLEqualDeep(t, tc.wantCommon, common)
+			assertYAMLEqualDeep(t, tc.wantU1, u1)
+			assertYAMLEqualDeep(t, tc.wantU2, u2)
+
+			m1, err := MergeYAML(u1, common)
+			if err != nil {
+				t.Fatalf("MergeYAML m1 error: %v", err)
+			}
+			m2, err := MergeYAML(u2, common)
+			if err != nil {
+				t.Fatalf("MergeYAML m2 error: %v", err)
+			}
+			assertYAMLEqualDeep(t, tc.y1, m1)
+			assertYAMLEqualDeep(t, tc.y2, m2)
+		})
 	}
-	assertYAMLEqualDeep(t, y1, m1)
-	assertYAMLEqualDeep(t, y2, m2)
 }
 
 func TestExtractCommonN_DeepNestedMaps_OrderInsensitive(t *testing.T) {
-	inputs := [][]byte{
-		[]byte(`root:
+	tests := []struct {
+		name           string
+		inputs         [][]byte
+		wantCommon     []byte
+		wantRemainders [][]byte
+	}{
+		{
+			name: "order-insensitive deep map extraction across N docs",
+			inputs: [][]byte{
+				[]byte(`root:
   cfg:
     env: prod
   shared:
@@ -83,7 +103,7 @@ func TestExtractCommonN_DeepNestedMaps_OrderInsensitive(t *testing.T) {
   svc:
     image: a:v1
 `),
-		[]byte(`root:
+				[]byte(`root:
   cfg:
     env: prod
   svc:
@@ -94,7 +114,7 @@ func TestExtractCommonN_DeepNestedMaps_OrderInsensitive(t *testing.T) {
         k2: v2
         k1: v1
 `),
-		[]byte(`root:
+				[]byte(`root:
   shared:
     deep:
       inner:
@@ -105,17 +125,8 @@ func TestExtractCommonN_DeepNestedMaps_OrderInsensitive(t *testing.T) {
   svc:
     image: c:v1
 `),
-	}
-
-	common, rems, err := ExtractCommonN(inputs)
-	if err != nil {
-		t.Fatalf("ExtractCommonN error: %v", err)
-	}
-	if len(rems) != 3 {
-		t.Fatalf("expected 3 remainders, got %d", len(rems))
-	}
-
-	expectCommon := []byte(`root:
+			},
+			wantCommon: []byte(`root:
   cfg:
     env: prod
   shared:
@@ -123,40 +134,43 @@ func TestExtractCommonN_DeepNestedMaps_OrderInsensitive(t *testing.T) {
       inner:
         k1: v1
         k2: v2
-`)
-	assertYAMLEqualDeep(t, expectCommon, common)
-
-	expectR1 := []byte(`root:
+`),
+			wantRemainders: [][]byte{
+				[]byte(`root:
   svc:
     image: a:v1
-`)
-	expectR2 := []byte(`root:
+`),
+				[]byte(`root:
   svc:
     image: b:v1
-`)
-	expectR3 := []byte(`root:
+`),
+				[]byte(`root:
   svc:
     image: c:v1
-`)
-	assertYAMLEqualDeep(t, expectR1, rems[0])
-	assertYAMLEqualDeep(t, expectR2, rems[1])
-	assertYAMLEqualDeep(t, expectR3, rems[2])
-
-	m0, err := MergeYAML(rems[0], common)
-	if err != nil {
-		t.Fatalf("merge 0: %v", err)
+`),
+			},
+		},
 	}
-	m1, err := MergeYAML(rems[1], common)
-	if err != nil {
-		t.Fatalf("merge 1: %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, rems, err := ExtractCommonN(tc.inputs)
+			if err != nil {
+				t.Fatalf("ExtractCommonN error: %v", err)
+			}
+			if len(rems) != len(tc.wantRemainders) {
+				t.Fatalf("expected %d remainders, got %d", len(tc.wantRemainders), len(rems))
+			}
+			assertYAMLEqualDeep(t, tc.wantCommon, common)
+			for i := range rems {
+				assertYAMLEqualDeep(t, tc.wantRemainders[i], rems[i])
+				m, err := MergeYAML(rems[i], common)
+				if err != nil {
+					t.Fatalf("merge %d: %v", i, err)
+				}
+				assertYAMLEqualDeep(t, tc.inputs[i], m)
+			}
+		})
 	}
-	m2, err := MergeYAML(rems[2], common)
-	if err != nil {
-		t.Fatalf("merge 2: %v", err)
-	}
-	assertYAMLEqualDeep(t, inputs[0], m0)
-	assertYAMLEqualDeep(t, inputs[1], m1)
-	assertYAMLEqualDeep(t, inputs[2], m2)
 }
 
 // Local helper to avoid colliding with existing helper name in another file

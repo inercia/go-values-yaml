@@ -96,3 +96,57 @@ resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits:   { cpu: 500m, memory: 512Mi }
 ```
+
+### Testing style
+
+- Always write unit tests in table-driven (tabular) form.
+- Define a `testCases := []struct{ ... }{}` with at least: `name`, inputs, expected outputs, optional options, and `wantErr` (or expected error type/value).
+- Iterate cases with `for _, tc := range testCases { t.Run(tc.name, func(t *testing.T) { ... }) }`.
+- In each case, clearly state the inputs and expected outputs. Do not compute expected results dynamically when avoidable.
+- For filesystem-based tests, create a `t.TempDir()` per case, write input files from `tc` fields, run the function under test, then read and assert outputs.
+- Prefer readable multi-line literals for YAML/JSON text in both inputs and expectations; compare logically (not by whitespace) using helpers.
+- Keep helper functions small and focused (I/O, YAML compare). Do not hide the test logic inside helpers.
+
+Example (Go):
+
+```go
+type options = []yaml.Option // if needed
+
+func TestExtractCommon_TableDriven(t *testing.T) {
+    tests := []struct {
+        name         string
+        y1, y2       []byte
+        opts         options
+        wantCommon   []byte
+        wantUpdated1 []byte
+        wantUpdated2 []byte
+        wantErr      error
+    }{
+        {
+            name: "nested common subset moved to parent; remainders kept",
+            y1:   []byte("foo:\n  bar:\n    a: 1\n    same: true\n"),
+            y2:   []byte("foo:\n  bar:\n    b: 2\n    same: true\n"),
+            wantCommon:   []byte("foo:\n  bar:\n    same: true\n"),
+            wantUpdated1: []byte("foo:\n  bar:\n    a: 1\n"),
+            wantUpdated2: []byte("foo:\n  bar:\n    b: 2\n"),
+        },
+    }
+    for _, tc := range tests {
+        t.Run(tc.name, func(t *testing.T) {
+            common, u1, u2, err := yaml.ExtractCommon(tc.y1, tc.y2, tc.opts...)
+            if tc.wantErr != nil {
+                if err == nil || !errors.Is(err, tc.wantErr) {
+                    t.Fatalf("want err %v, got %v", tc.wantErr, err)
+                }
+                return
+            }
+            if err != nil {
+                t.Fatalf("ExtractCommon error: %v", err)
+            }
+            assertYAMLEqual(t, tc.wantCommon, common)
+            assertYAMLEqual(t, tc.wantUpdated1, u1)
+            assertYAMLEqual(t, tc.wantUpdated2, u2)
+        })
+    }
+}
+```

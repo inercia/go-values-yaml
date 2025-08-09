@@ -8,120 +8,193 @@ import (
 )
 
 func TestExtractCommon_SimpleMaps(t *testing.T) {
-	y1 := []byte(`
+	tests := []struct {
+		name         string
+		y1, y2       []byte
+		opts         []Option
+		wantCommon   []byte
+		wantUpdated1 []byte
+		wantUpdated2 []byte
+	}{
+		{
+			name: "simple maps with nested common subset",
+			y1: []byte(`
 foo:
   bar:
     something: [1,2,3]
     other: true
-`)
-	y2 := []byte(`
+`),
+			y2: []byte(`
 foo:
   bar:
     else: [1,2,3]
     other: true
-`)
-
-	common, u1, u2, err := ExtractCommon(y1, y2)
-	if err != nil {
-		t.Fatalf("ExtractCommon error: %v", err)
-	}
-
-	expectCommon := []byte(`foo:
+`),
+			wantCommon: []byte(`foo:
   bar:
     other: true
-`)
-	expectU1 := []byte(`foo:
+`),
+			wantUpdated1: []byte(`foo:
   bar:
     something:
     - 1
     - 2
     - 3
-`)
-	expectU2 := []byte(`foo:
+`),
+			wantUpdated2: []byte(`foo:
   bar:
     else:
     - 1
     - 2
     - 3
-`)
-
-	assertYAMLEqual(t, expectCommon, common)
-	assertYAMLEqual(t, expectU1, u1)
-	assertYAMLEqual(t, expectU2, u2)
-
-	// Merge property
-	m1, err := MergeYAML(u1, common)
-	if err != nil {
-		t.Fatalf("MergeYAML m1 error: %v", err)
+`),
+		},
 	}
-	m2, err := MergeYAML(u2, common)
-	if err != nil {
-		t.Fatalf("MergeYAML m2 error: %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, u1, u2, err := ExtractCommon(tc.y1, tc.y2, tc.opts...)
+			if err != nil {
+				t.Fatalf("ExtractCommon error: %v", err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			assertYAMLEqual(t, tc.wantUpdated1, u1)
+			assertYAMLEqual(t, tc.wantUpdated2, u2)
+
+			m1, err := MergeYAML(u1, common)
+			if err != nil {
+				t.Fatalf("MergeYAML m1 error: %v", err)
+			}
+			m2, err := MergeYAML(u2, common)
+			if err != nil {
+				t.Fatalf("MergeYAML m2 error: %v", err)
+			}
+			assertYAMLEqual(t, tc.y1, m1)
+			assertYAMLEqual(t, tc.y2, m2)
+		})
 	}
-	assertYAMLEqual(t, y1, m1)
-	assertYAMLEqual(t, y2, m2)
 }
 
 func TestExtractCommon_ListsEqual_InCommon_ByDefault(t *testing.T) {
-	y1 := []byte(`a: [1, 2, 3]`)
-	y2 := []byte(`a: [1, 2, 3]`)
-
-	common, u1, u2, err := ExtractCommon(y1, y2)
-	if err != nil {
-		t.Fatalf("ExtractCommon error: %v", err)
+	tests := []struct {
+		name       string
+		y1, y2     []byte
+		opts       []Option
+		wantCommon []byte
+		wantU1     []byte
+		wantU2     []byte
+	}{
+		{
+			name:       "equal lists go to common by default",
+			y1:         []byte("a: [1, 2, 3]"),
+			y2:         []byte("a: [1, 2, 3]"),
+			wantCommon: []byte("a:\n- 1\n- 2\n- 3\n"),
+			wantU1:     []byte("{}\n"),
+			wantU2:     []byte("{}\n"),
+		},
 	}
-	assertYAMLEqual(t, []byte("a:\n- 1\n- 2\n- 3\n"), common)
-	assertYAMLEqual(t, []byte("{}\n"), u1)
-	assertYAMLEqual(t, []byte("{}\n"), u2)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, u1, u2, err := ExtractCommon(tc.y1, tc.y2, tc.opts...)
+			if err != nil {
+				t.Fatalf("ExtractCommon error: %v", err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			assertYAMLEqual(t, tc.wantU1, u1)
+			assertYAMLEqual(t, tc.wantU2, u2)
+		})
+	}
 }
 
 func TestExtractCommon_ListsEqual_NotInCommon_WithOption(t *testing.T) {
-	y1 := []byte(`a: [1, 2, 3]`)
-	y2 := []byte(`a: [1, 2, 3]`)
+	tests := []struct {
+		name       string
+		y1, y2     []byte
+		opts       []Option
+		wantCommon []byte
+		wantU1     []byte
+		wantU2     []byte
+	}{
+		{
+			name:       "equal lists remain in remainders when option disabled",
+			y1:         []byte("a: [1, 2, 3]"),
+			y2:         []byte("a: [1, 2, 3]"),
+			opts:       []Option{WithIncludeEqualListsInCommon(false)},
+			wantCommon: []byte("{}\n"),
+			wantU1:     []byte("a:\n- 1\n- 2\n- 3\n"),
+			wantU2:     []byte("a:\n- 1\n- 2\n- 3\n"),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, u1, u2, err := ExtractCommon(tc.y1, tc.y2, tc.opts...)
+			if err != nil {
+				t.Fatalf("ExtractCommon error: %v", err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			assertYAMLEqual(t, tc.wantU1, u1)
+			assertYAMLEqual(t, tc.wantU2, u2)
 
-	common, u1, u2, err := ExtractCommon(y1, y2, WithIncludeEqualListsInCommon(false))
-	if err != nil {
-		t.Fatalf("ExtractCommon error: %v", err)
+			m1, err := MergeYAML(u1, common)
+			if err != nil {
+				t.Fatalf("MergeYAML m1 error: %v", err)
+			}
+			m2, err := MergeYAML(u2, common)
+			if err != nil {
+				t.Fatalf("MergeYAML m2 error: %v", err)
+			}
+			assertYAMLEqual(t, tc.y1, m1)
+			assertYAMLEqual(t, tc.y2, m2)
+		})
 	}
-	assertYAMLEqual(t, []byte("{}\n"), common)
-	assertYAMLEqual(t, []byte("a:\n- 1\n- 2\n- 3\n"), u1)
-	assertYAMLEqual(t, []byte("a:\n- 1\n- 2\n- 3\n"), u2)
-
-	// Merge property
-	m1, err := MergeYAML(u1, common)
-	if err != nil {
-		t.Fatalf("MergeYAML m1 error: %v", err)
-	}
-	m2, err := MergeYAML(u2, common)
-	if err != nil {
-		t.Fatalf("MergeYAML m2 error: %v", err)
-	}
-	assertYAMLEqual(t, y1, m1)
-	assertYAMLEqual(t, y2, m2)
 }
 
 func TestExtractCommon_Scalars(t *testing.T) {
-	// equal scalars -> common
-	common, u1, u2, err := ExtractCommon([]byte("a: 5\n"), []byte("a: 5\n"))
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name       string
+		y1, y2     []byte
+		wantCommon []byte
+		wantU1     []byte
+		wantU2     []byte
+	}{
+		{
+			name:       "equal scalars go to common",
+			y1:         []byte("a: 5\n"),
+			y2:         []byte("a: 5\n"),
+			wantCommon: []byte("a: 5\n"),
+			wantU1:     []byte("{}\n"),
+			wantU2:     []byte("{}\n"),
+		},
+		{
+			name:       "different scalars remain in remainders",
+			y1:         []byte("a: 5\n"),
+			y2:         []byte("a: 7\n"),
+			wantCommon: []byte("{}\n"),
+			wantU1:     []byte("a: 5\n"),
+			wantU2:     []byte("a: 7\n"),
+		},
 	}
-	assertYAMLEqual(t, []byte("a: 5\n"), common)
-	assertYAMLEqual(t, []byte("{}\n"), u1)
-	assertYAMLEqual(t, []byte("{}\n"), u2)
-
-	// different scalars -> in remainders
-	common, u1, u2, err = ExtractCommon([]byte("a: 5\n"), []byte("a: 7\n"))
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, u1, u2, err := ExtractCommon(tc.y1, tc.y2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			assertYAMLEqual(t, tc.wantU1, u1)
+			assertYAMLEqual(t, tc.wantU2, u2)
+		})
 	}
-	assertYAMLEqual(t, []byte("{}\n"), common)
-	assertYAMLEqual(t, []byte("a: 5\n"), u1)
-	assertYAMLEqual(t, []byte("a: 7\n"), u2)
 }
 
 func TestExtractCommon_NestedStructures(t *testing.T) {
-	y1 := []byte(`
+	tests := []struct {
+		name       string
+		y1, y2     []byte
+		wantCommon []byte
+	}{
+		{
+			name: "nested structures with partial common",
+			y1: []byte(`
 parent:
   child:
     name: app
@@ -129,8 +202,8 @@ parent:
     ports:
       - 80
       - 443
-`)
-	y2 := []byte(`
+`),
+			y2: []byte(`
 parent:
   child:
     name: app
@@ -138,171 +211,269 @@ parent:
     ports:
       - 80
       - 8080
-`)
-
-	common, u1, u2, err := ExtractCommon(y1, y2)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectCommon := []byte(`parent:
+`),
+			wantCommon: []byte(`parent:
   child:
     name: app
-`)
-	assertYAMLEqual(t, expectCommon, common)
+`),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, u1, u2, err := ExtractCommon(tc.y1, tc.y2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
 
-	// Merge property
-	m1, err := MergeYAML(u1, common)
-	if err != nil {
-		t.Fatal(err)
+			m1, err := MergeYAML(u1, common)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m2, err := MergeYAML(u2, common)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertYAMLEqual(t, tc.y1, m1)
+			assertYAMLEqual(t, tc.y2, m2)
+		})
 	}
-	m2, err := MergeYAML(u2, common)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertYAMLEqual(t, y1, m1)
-	assertYAMLEqual(t, y2, m2)
 }
 
 func TestExtractCommon_NoCommon_DisjointKeys(t *testing.T) {
-	y1 := []byte(`
+	tests := []struct {
+		name       string
+		y1, y2     []byte
+		wantCommon []byte
+		wantU1     []byte
+		wantU2     []byte
+	}{
+		{
+			name: "disjoint top-level maps -> no common",
+			y1: []byte(`
 a: 1
 b:
   c: 2
-`)
-	y2 := []byte(`
+`),
+			y2: []byte(`
 x: true
 y:
   z: 3
-`)
-
-	common, u1, u2, err := ExtractCommon(y1, y2)
-	if err != nil {
-		t.Fatal(err)
+`),
+			wantCommon: []byte("{}\n"),
+			wantU1:     []byte("a: 1\n" + "b:\n  c: 2\n"),
+			wantU2:     []byte("x: true\n" + "y:\n  z: 3\n"),
+		},
 	}
-	assertYAMLEqual(t, []byte("{}\n"), common)
-	assertYAMLEqual(t, y1, u1)
-	assertYAMLEqual(t, y2, u2)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, u1, u2, err := ExtractCommon(tc.y1, tc.y2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			assertYAMLEqual(t, tc.wantU1, u1)
+			assertYAMLEqual(t, tc.wantU2, u2)
+		})
+	}
 }
 
 func TestExtractCommon_NoCommon_DifferentTopLevelLists(t *testing.T) {
-	y1 := []byte(`
-- 1
-- 2
-`)
-	y2 := []byte(`
-- 3
-- 4
-`)
-
-	common, u1, u2, err := ExtractCommon(y1, y2)
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name       string
+		y1, y2     []byte
+		wantCommon []byte
+		wantU1     []byte
+		wantU2     []byte
+	}{
+		{
+			name:       "different top-level lists -> no common",
+			y1:         []byte("\n- 1\n- 2\n"),
+			y2:         []byte("\n- 3\n- 4\n"),
+			wantCommon: []byte("{}\n"),
+			wantU1:     []byte("- 1\n- 2\n"),
+			wantU2:     []byte("- 3\n- 4\n"),
+		},
 	}
-	assertYAMLEqual(t, []byte("{}\n"), common)
-	assertYAMLEqual(t, y1, u1)
-	assertYAMLEqual(t, y2, u2)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, u1, u2, err := ExtractCommon(tc.y1, tc.y2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			assertYAMLEqual(t, tc.wantU1, u1)
+			assertYAMLEqual(t, tc.wantU2, u2)
+		})
+	}
 }
 
 func TestExtractCommon_NoCommon_DifferentTypes(t *testing.T) {
-	y1 := []byte(`a: 1`)
-	y2 := []byte(`
-- item1
-- item2
-`)
-	common, u1, u2, err := ExtractCommon(y1, y2)
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name       string
+		y1, y2     []byte
+		wantCommon []byte
+		wantU1     []byte
+		wantU2     []byte
+	}{
+		{
+			name:       "different YAML types -> no common",
+			y1:         []byte("a: 1"),
+			y2:         []byte("\n- item1\n- item2\n"),
+			wantCommon: []byte("{}\n"),
+			wantU1:     []byte("a: 1\n"),
+			wantU2:     []byte("- item1\n- item2\n"),
+		},
 	}
-	assertYAMLEqual(t, []byte("{}\n"), common)
-	assertYAMLEqual(t, y1, u1)
-	assertYAMLEqual(t, y2, u2)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, u1, u2, err := ExtractCommon(tc.y1, tc.y2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			assertYAMLEqual(t, tc.wantU1, u1)
+			assertYAMLEqual(t, tc.wantU2, u2)
+		})
+	}
 }
 
 func TestExtractCommonN_ThreeDocs_CommonAndRemainders(t *testing.T) {
-	inputs := [][]byte{
-		[]byte(`foo:
+	tests := []struct {
+		name           string
+		inputs         [][]byte
+		wantCommon     []byte
+		wantRemainders [][]byte
+	}{
+		{
+			name: "three docs with shared subset",
+			inputs: [][]byte{
+				[]byte(`foo:
   bar:
     k1: v1
     same: true
 `),
-		[]byte(`foo:
+				[]byte(`foo:
   bar:
     k2: v2
     same: true
 `),
-		[]byte(`foo:
+				[]byte(`foo:
   bar:
     k3: v3
     same: true
 `),
-	}
-	common, rems, err := ExtractCommonN(inputs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertYAMLEqual(t, []byte(`foo:
+			},
+			wantCommon: []byte(`foo:
   bar:
     same: true
-`), common)
-	if len(rems) != 3 {
-		t.Fatalf("expected 3 remainders, got %d", len(rems))
-	}
-	assertYAMLEqual(t, []byte(`foo:
+`),
+			wantRemainders: [][]byte{
+				[]byte(`foo:
   bar:
     k1: v1
-`), rems[0])
-	assertYAMLEqual(t, []byte(`foo:
+`),
+				[]byte(`foo:
   bar:
     k2: v2
-`), rems[1])
-	assertYAMLEqual(t, []byte(`foo:
+`),
+				[]byte(`foo:
   bar:
     k3: v3
-`), rems[2])
-
-	// Merge property
-	m0, _ := MergeYAML(rems[0], common)
-	m1, _ := MergeYAML(rems[1], common)
-	m2, _ := MergeYAML(rems[2], common)
-	assertYAMLEqual(t, inputs[0], m0)
-	assertYAMLEqual(t, inputs[1], m1)
-	assertYAMLEqual(t, inputs[2], m2)
+`),
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, rems, err := ExtractCommonN(tc.inputs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			if len(rems) != len(tc.wantRemainders) {
+				t.Fatalf("expected %d remainders, got %d", len(tc.wantRemainders), len(rems))
+			}
+			for i := range rems {
+				assertYAMLEqual(t, tc.wantRemainders[i], rems[i])
+				m, _ := MergeYAML(rems[i], common)
+				assertYAMLEqual(t, tc.inputs[i], m)
+			}
+		})
+	}
 }
 
 func TestExtractCommonN_Lists_AllEqual_DefaultInCommon(t *testing.T) {
-	inputs := [][]byte{
-		[]byte(`a: [1,2,3]`),
-		[]byte(`a: [1,2,3]`),
-		[]byte(`a: [1,2,3]`),
+	tests := []struct {
+		name           string
+		inputs         [][]byte
+		wantCommon     []byte
+		wantRemainders [][]byte
+	}{
+		{
+			name: "lists all equal -> common contains list",
+			inputs: [][]byte{
+				[]byte(`a: [1,2,3]`),
+				[]byte(`a: [1,2,3]`),
+				[]byte(`a: [1,2,3]`),
+			},
+			wantCommon: []byte("a:\n- 1\n- 2\n- 3\n"),
+			wantRemainders: [][]byte{
+				[]byte("{}\n"), []byte("{}\n"), []byte("{}\n"),
+			},
+		},
 	}
-	common, rems, err := ExtractCommonN(inputs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertYAMLEqual(t, []byte("a:\n- 1\n- 2\n- 3\n"), common)
-	for _, r := range rems {
-		assertYAMLEqual(t, []byte("{}\n"), r)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, rems, err := ExtractCommonN(tc.inputs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			for i := range rems {
+				assertYAMLEqual(t, tc.wantRemainders[i], rems[i])
+			}
+		})
 	}
 }
 
 func TestExtractCommonN_Disjoint_NoCommon(t *testing.T) {
-	inputs := [][]byte{
-		[]byte(`a: 1`),
-		[]byte(`b: 2`),
-		[]byte(`c: 3`),
+	tests := []struct {
+		name           string
+		inputs         [][]byte
+		wantCommon     []byte
+		wantRemainders [][]byte
+	}{
+		{
+			name: "disjoint inputs -> empty common",
+			inputs: [][]byte{
+				[]byte(`a: 1`),
+				[]byte(`b: 2`),
+				[]byte(`c: 3`),
+			},
+			wantCommon: []byte("{}\n"),
+			wantRemainders: [][]byte{
+				[]byte("a: 1\n"),
+				[]byte("b: 2\n"),
+				[]byte("c: 3\n"),
+			},
+		},
 	}
-	common, rems, err := ExtractCommonN(inputs)
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, rems, err := ExtractCommonN(tc.inputs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			if len(rems) != len(tc.wantRemainders) {
+				t.Fatalf("expected %d remainders, got %d", len(tc.wantRemainders), len(rems))
+			}
+			for i := range rems {
+				assertYAMLEqual(t, tc.wantRemainders[i], rems[i])
+			}
+		})
 	}
-	assertYAMLEqual(t, []byte("{}\n"), common)
-	if len(rems) != 3 {
-		t.Fatalf("expected 3 remainders, got %d", len(rems))
-	}
-	assertYAMLEqual(t, []byte("a: 1\n"), rems[0])
-	assertYAMLEqual(t, []byte("b: 2\n"), rems[1])
-	assertYAMLEqual(t, []byte("c: 3\n"), rems[2])
 }
 
 // assertYAMLEqual compares YAML by unmarshaling and deep comparing.
