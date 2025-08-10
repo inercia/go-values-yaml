@@ -1,7 +1,6 @@
 package values
 
 import (
-	"io/fs"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -10,19 +9,7 @@ import (
 	"github.com/psanford/memfs"
 )
 
-// memfsOps implements fileOps on top of github.com/psanford/memfs
-// for use in tests.
-type memfsOps struct{ fsys *memfs.FS }
 
-func (m memfsOps) Stat(name string) (fs.FileInfo, error)        { return fs.Stat(m.fsys, name) }
-func (m memfsOps) ReadFile(name string) ([]byte, error)         { return fs.ReadFile(m.fsys, name) }
-func (m memfsOps) WalkDir(root string, fn fs.WalkDirFunc) error { return fs.WalkDir(m.fsys, root, fn) }
-func (m memfsOps) WriteFileAtomic(path string, data []byte, perm fs.FileMode) error {
-	if err := m.fsys.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return err
-	}
-	return m.fsys.WriteFile(path, data, perm)
-}
 
 func TestExtractCommonRecursive_MemFS_DeepHierarchyMultiLevel(t *testing.T) {
 	tests := []struct {
@@ -55,7 +42,7 @@ func TestExtractCommonRecursive_MemFS_DeepHierarchyMultiLevel(t *testing.T) {
 			}
 
 			// prod/apps
-			writeY(t, mfs, "root/org/prod/apps/api/values.yaml", []byte(`meta:
+			writeMemFile(t, mfs, "root/org/prod/apps/api/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -65,7 +52,7 @@ svc:
   port: 80
   replicas: 2
 `))
-			writeY(t, mfs, "root/org/prod/apps/web/values.yaml", []byte(`meta:
+			writeMemFile(t, mfs, "root/org/prod/apps/web/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -76,7 +63,7 @@ svc:
   replicas: 3
 `))
 			// prod/tools
-			writeY(t, mfs, "root/org/prod/tools/monitor/values.yaml", []byte(`meta:
+			writeMemFile(t, mfs, "root/org/prod/tools/monitor/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -86,7 +73,7 @@ ops:
   endpoints:
     - metrics
 `))
-			writeY(t, mfs, "root/org/prod/tools/backup/values.yaml", []byte(`meta:
+			writeMemFile(t, mfs, "root/org/prod/tools/backup/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -97,7 +84,7 @@ ops:
     - backups
 `))
 			// staging/apps
-			writeY(t, mfs, "root/org/staging/apps/api/values.yaml", []byte(`meta:
+			writeMemFile(t, mfs, "root/org/staging/apps/api/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -107,7 +94,7 @@ svc:
   port: 80
   replicas: 1
 `))
-			writeY(t, mfs, "root/org/staging/apps/web/values.yaml", []byte(`meta:
+			writeMemFile(t, mfs, "root/org/staging/apps/web/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -118,7 +105,7 @@ svc:
   replicas: 1
 `))
 			// staging/tools
-			writeY(t, mfs, "root/org/staging/tools/monitor/values.yaml", []byte(`meta:
+			writeMemFile(t, mfs, "root/org/staging/tools/monitor/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -128,7 +115,7 @@ ops:
   endpoints:
     - metrics
 `))
-			writeY(t, mfs, "root/org/staging/tools/backup/values.yaml", []byte(`meta:
+			writeMemFile(t, mfs, "root/org/staging/tools/backup/values.yaml", []byte(`meta:
   company: acme
   policy:
     logs: true
@@ -160,29 +147,29 @@ ops:
 			assertYAMLEqual(t, []byte(`svc:
   team: app
   port: 80
-`), readY(t, mfs, "root/org/prod/apps/values.yaml"))
+`), readMemFile(t, mfs, "root/org/prod/apps/values.yaml"))
 			assertYAMLEqual(t, []byte(`svc:
   image: api:v1
   replicas: 2
-`), readY(t, mfs, "root/org/prod/apps/api/values.yaml"))
+`), readMemFile(t, mfs, "root/org/prod/apps/api/values.yaml"))
 			assertYAMLEqual(t, []byte(`svc:
   image: web:v1
   replicas: 3
-`), readY(t, mfs, "root/org/prod/apps/web/values.yaml"))
+`), readMemFile(t, mfs, "root/org/prod/apps/web/values.yaml"))
 
 			assertYAMLEqual(t, []byte(`ops:
   team: ops
   monitoring: true
-`), readY(t, mfs, "root/org/prod/tools/values.yaml"))
+`), readMemFile(t, mfs, "root/org/prod/tools/values.yaml"))
 			assertYAMLEqual(t, []byte(`{}
-`), readY(t, mfs, "root/org/prod/values.yaml"))
+`), readMemFile(t, mfs, "root/org/prod/values.yaml"))
 			assertYAMLEqual(t, []byte(`{}
-`), readY(t, mfs, "root/org/staging/values.yaml"))
+`), readMemFile(t, mfs, "root/org/staging/values.yaml"))
 			assertYAMLEqual(t, []byte(`meta:
   company: acme
   policy:
     logs: true
-`), readY(t, mfs, "root/org/values.yaml"))
+`), readMemFile(t, mfs, "root/org/values.yaml"))
 		})
 	}
 }
@@ -229,9 +216,9 @@ func TestExtractCommonN_MemFS_EqualListsOption(t *testing.T) {
 				// write YAML
 				if tc.root == "grp" {
 					// special case to match previous test expectations
-					writeY(t, mfs, p, []byte("cfg:\n  list: ["+tc.lists[i][0]+","+tc.lists[i][1]+","+tc.lists[i][2]+"]\n"))
+					writeMemFile(t, mfs, p, []byte("cfg:\n  list: ["+tc.lists[i][0]+","+tc.lists[i][1]+","+tc.lists[i][2]+"]\n"))
 				} else {
-					writeY(t, mfs, p, []byte("cfg:\n  list:\n    - "+tc.lists[i][0]+"\n    - "+tc.lists[i][1]+"\n"))
+					writeMemFile(t, mfs, p, []byte("cfg:\n  list:\n    - "+tc.lists[i][0]+"\n    - "+tc.lists[i][1]+"\n"))
 				}
 			}
 			// run
@@ -255,7 +242,7 @@ func TestExtractCommonN_MemFS_EqualListsOption(t *testing.T) {
 				t.Fatalf("unexpected common path: %s", cp)
 			}
 			if tc.wantCommonYAML != nil {
-				assertYAMLEqual(t, tc.wantCommonYAML, readY(t, mfs, cp))
+				assertYAMLEqual(t, tc.wantCommonYAML, readMemFile(t, mfs, cp))
 			}
 		})
 	}
@@ -266,8 +253,8 @@ func TestExtractCommon_MemFS_NoCommon_NoChanges(t *testing.T) {
 	ops := memfsOps{fsys: mfs}
 	_ = mfs.MkdirAll("grp/x", 0o755)
 	_ = mfs.MkdirAll("grp/y", 0o755)
-	writeY(t, mfs, "grp/x/values.yaml", []byte("a: 1\n"))
-	writeY(t, mfs, "grp/y/values.yaml", []byte("b: 2\n"))
+	writeMemFile(t, mfs, "grp/x/values.yaml", []byte("a: 1\n"))
+	writeMemFile(t, mfs, "grp/y/values.yaml", []byte("b: 2\n"))
 	_, err := ExtractCommon("grp/x/values.yaml", "grp/y/values.yaml", WithFileOps(ops))
 	if err == nil {
 		t.Fatalf("expected ErrNoCommon, got nil")
@@ -275,26 +262,6 @@ func TestExtractCommon_MemFS_NoCommon_NoChanges(t *testing.T) {
 	if err != ErrNoCommon {
 		t.Fatalf("expected ErrNoCommon, got %v", err)
 	}
-	assertYAMLEqual(t, []byte("a: 1\n"), readY(t, mfs, "grp/x/values.yaml"))
-	assertYAMLEqual(t, []byte("b: 2\n"), readY(t, mfs, "grp/y/values.yaml"))
-}
-
-// Helpers for memfs tests
-func writeY(t *testing.T, mfs *memfs.FS, path string, data []byte) {
-	t.Helper()
-	if err := mfs.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := mfs.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-}
-
-func readY(t *testing.T, mfs *memfs.FS, path string) []byte {
-	t.Helper()
-	b, err := fs.ReadFile(mfs, path)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-	return b
+	assertYAMLEqual(t, []byte("a: 1\n"), readMemFile(t, mfs, "grp/x/values.yaml"))
+	assertYAMLEqual(t, []byte("b: 2\n"), readMemFile(t, mfs, "grp/y/values.yaml"))
 }

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	yamllib "github.com/inercia/go-values-yaml/pkg/yaml"
-	syaml "sigs.k8s.io/yaml"
 )
 
 func TestExtractCommon_CreatesCommonAndUpdatesChildren(t *testing.T) {
@@ -53,17 +52,10 @@ func TestExtractCommon_CreatesCommonAndUpdatesChildren(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			bdir := filepath.Join(dir, "a", "b")
-			xdir := filepath.Join(bdir, "x")
-			ydir := filepath.Join(bdir, "y")
-			mustMkdirAll(t, xdir)
-			mustMkdirAll(t, ydir)
-
-			p1 := filepath.Join(xdir, "values.yaml")
-			p2 := filepath.Join(ydir, "values.yaml")
-			mustWriteFile(t, p1, tc.y1)
-			mustWriteFile(t, p2, tc.y2)
+			_, dirs := setupTempDirs(t, "a/b/x", "a/b/y")
+			paths := setupValuesFiles(t, dirs, [][]byte{tc.y1, tc.y2})
+			bdir := filepath.Dir(dirs[0])
+			p1, p2 := paths[0], paths[1]
 
 			commonPath, err := ExtractCommon(p1, p2)
 			if err != nil {
@@ -128,16 +120,9 @@ func TestExtractCommonN_CreatesCommonAndUpdatesAll(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			bdir := filepath.Join(dir, "a", "b")
-			dirs := []string{filepath.Join(bdir, "x"), filepath.Join(bdir, "y"), filepath.Join(bdir, "z")}
-			for _, d := range dirs {
-				mustMkdirAll(t, d)
-			}
-			paths := []string{filepath.Join(dirs[0], "values.yaml"), filepath.Join(dirs[1], "values.yaml"), filepath.Join(dirs[2], "values.yaml")}
-			for i, p := range paths {
-				mustWriteFile(t, p, tc.inputs[i])
-			}
+			_, dirs := setupTempDirs(t, "a/b/x", "a/b/y", "a/b/z")
+			paths := setupValuesFiles(t, dirs, tc.inputs)
+			bdir := filepath.Dir(dirs[0])
 			commonPath, err := ExtractCommonN(paths)
 			if err != nil {
 				t.Fatalf("ExtractCommonN error: %v", err)
@@ -167,17 +152,9 @@ func TestExtractCommonN_NoCommon_ReturnsErrAndNoChanges(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			bdir := filepath.Join(dir, "a", "b")
-			d1 := filepath.Join(bdir, "x")
-			d2 := filepath.Join(bdir, "y")
-			mustMkdirAll(t, d1)
-			mustMkdirAll(t, d2)
-
-			p1 := filepath.Join(d1, "values.yaml")
-			p2 := filepath.Join(d2, "values.yaml")
-			mustWriteFile(t, p1, tc.in1)
-			mustWriteFile(t, p2, tc.in2)
+			_, dirs := setupTempDirs(t, "a/b/x", "a/b/y")
+			paths := setupValuesFiles(t, dirs, [][]byte{tc.in1, tc.in2})
+			p1, p2 := paths[0], paths[1]
 
 			_, err := ExtractCommonN([]string{p1, p2})
 			if err == nil {
@@ -359,16 +336,7 @@ func TestExtractCommonRecursive_SingleParentGroup(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			parent := filepath.Join(dir, "apps")
-			d1 := filepath.Join(parent, "svc-a")
-			d2 := filepath.Join(parent, "svc-b")
-			mustMkdirAll(t, d1)
-			mustMkdirAll(t, d2)
-
-			p1 := filepath.Join(d1, "values.yaml")
-			p2 := filepath.Join(d2, "values.yaml")
-
+			dir, dirs := setupTempDirs(t, "apps/svc-a", "apps/svc-b")
 			y1 := []byte(`foo:
   bar:
     a: 1
@@ -379,8 +347,9 @@ func TestExtractCommonRecursive_SingleParentGroup(t *testing.T) {
     b: 2
     common: yes
 `)
-			mustWriteFile(t, p1, y1)
-			mustWriteFile(t, p2, y2)
+			paths := setupValuesFiles(t, dirs, [][]byte{y1, y2})
+			parent := filepath.Dir(dirs[0])
+			p1, p2 := paths[0], paths[1]
 
 			created, err := ExtractCommonRecursive(dir)
 			if err != nil {
@@ -889,46 +858,4 @@ feat:
 		t.Fatalf("merge back p3: %v", err)
 	}
 	assertYAMLEqual(t, y3, rec3)
-}
-
-func mustMkdirAll(t *testing.T, path string) {
-	t.Helper()
-	if err := os.MkdirAll(path, 0o750); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-}
-
-func mustWriteFile(t *testing.T, path string, data []byte) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		t.Fatalf("mkdir for write: %v", err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-}
-
-func mustReadFile(t *testing.T, path string) []byte {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-	return data
-}
-
-// assertYAMLEqual compares YAML by unmarshaling and deep comparing.
-func assertYAMLEqual(t *testing.T, expect, got []byte) {
-	t.Helper()
-	var ev any
-	var gv any
-	if err := syaml.Unmarshal(expect, &ev); err != nil {
-		t.Fatalf("unmarshal expect: %v", err)
-	}
-	if err := syaml.Unmarshal(got, &gv); err != nil {
-		t.Fatalf("unmarshal got: %v", err)
-	}
-	if !reflect.DeepEqual(ev, gv) {
-		t.Fatalf("YAML not equal\nexpect:\n%s\ngot:\n%s", expect, got)
-	}
 }
