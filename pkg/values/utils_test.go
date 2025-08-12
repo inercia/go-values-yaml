@@ -121,7 +121,7 @@ func setupValuesFiles(t *testing.T, dirs []string, contents [][]byte) []string {
 	if len(dirs) != len(contents) {
 		t.Fatalf("dirs and contents length mismatch: %d vs %d", len(dirs), len(contents))
 	}
-	
+
 	paths := make([]string, len(dirs))
 	for i, dir := range dirs {
 		path := filepath.Join(dir, "values.yaml")

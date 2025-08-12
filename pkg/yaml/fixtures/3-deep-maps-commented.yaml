@@ -1,0 +1,14 @@
+root:
+  a:
+    # shared:
+    #   deep:
+    #     inner:
+    #       alpha: 1
+    #       beta: 2
+    svc:
+      image: a:v1
+      # replicas: 2
+  b:
+    flags:
+      # debug: false
+      enabled: true

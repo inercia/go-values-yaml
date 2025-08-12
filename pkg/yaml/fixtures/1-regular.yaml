@@ -1,0 +1,21 @@
+cgw-flex-templates:
+  httpProxy:
+    annotations:
+      translation.adobe.io/ams-env:
+        value: aces-stage-backup
+      translation.adobe.io/ams-env-name:
+        value: stage-backup
+      translation.adobe.io/environment:
+        value: stage-backup
+      translation.adobe.io/is-production:
+        value: "false"
+      translation.adobe.io/service-config:
+        value: FB4V9Rmgrkslw8QluN0aAlTEfmMOgCiK
+    clusterGateway:
+      allowedClientIDs:
+      - acquisition-summaries
+      globalSettings: {}
+    fqdn: aces-stage-backup.adobe.io
+global:
+  clusterName: ethos102-stage-va6
+  publicAccessLevelWarning: false

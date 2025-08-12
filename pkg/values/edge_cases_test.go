@@ -8,9 +8,9 @@ import (
 
 func TestExtractCommon_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name     string
-		y1, y2   []byte
-		wantErr  bool
+		name       string
+		y1, y2     []byte
+		wantErr    bool
 		wantCommon []byte
 	}{
 		{
@@ -101,7 +101,7 @@ extra: value`),
 		t.Run(tc.name, func(t *testing.T) {
 			_, dirs := setupTempDirs(t, "a/b/x", "a/b/y")
 			paths := setupValuesFiles(t, dirs, [][]byte{tc.y1, tc.y2})
-			
+
 			_, err := ExtractCommon(paths[0], paths[1])
 			if tc.wantErr {
 				if err == nil {
@@ -112,11 +112,11 @@ extra: value`),
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			
+
 			if tc.wantCommon != nil {
 				commonPath := filepath.Join(filepath.Dir(dirs[0]), "values.yaml")
 				assertYAMLEqual(t, tc.wantCommon, mustReadFile(t, commonPath))
@@ -127,10 +127,10 @@ extra: value`),
 
 func TestExtractCommonN_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name     string
-		inputs   [][]byte
-		wantErr  bool
-		errMsg   string
+		name    string
+		inputs  [][]byte
+		wantErr bool
+		errMsg  string
 	}{
 		{
 			name:    "zero files should error",
@@ -208,7 +208,7 @@ func TestExtractCommon_InvalidYAML(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "malformed YAML in second file", 
+			name:    "malformed YAML in second file",
 			y1:      []byte("valid: true"),
 			y2:      []byte("invalid: {\n  broken"),
 			wantErr: true,
@@ -225,7 +225,7 @@ func TestExtractCommon_InvalidYAML(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, dirs := setupTempDirs(t, "a/b/x", "a/b/y")
 			paths := setupValuesFiles(t, dirs, [][]byte{tc.y1, tc.y2})
-			
+
 			_, err := ExtractCommon(paths[0], paths[1])
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected error for malformed YAML, got nil")
@@ -236,9 +236,9 @@ func TestExtractCommon_InvalidYAML(t *testing.T) {
 
 func TestExtractCommon_FilePermissions(t *testing.T) {
 	tests := []struct {
-		name           string
-		makeReadOnly   bool
-		wantErr        bool
+		name         string
+		makeReadOnly bool
+		wantErr      bool
 	}{
 		{
 			name:         "writable parent directory should succeed",
@@ -258,7 +258,7 @@ func TestExtractCommon_FilePermissions(t *testing.T) {
 			y1 := []byte("shared: value\nunique1: val1")
 			y2 := []byte("shared: value\nunique2: val2")
 			paths := setupValuesFiles(t, dirs, [][]byte{y1, y2})
-			
+
 			parent := filepath.Dir(dirs[0])
 			if tc.makeReadOnly {
 				cleanup := makeReadOnly(t, parent)
@@ -294,7 +294,7 @@ func TestExtractCommon_FilenameValidation(t *testing.T) {
 		{
 			name:      "both non-values.yaml should error",
 			filename1: "app.yaml",
-			filename2: "config.yaml", 
+			filename2: "config.yaml",
 			wantErr:   true,
 			errMsg:    "must be named values.yaml",
 		},
@@ -309,7 +309,7 @@ func TestExtractCommon_FilenameValidation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, dirs := setupTempDirs(t, "a/b/x", "a/b/y")
-			
+
 			p1 := filepath.Join(dirs[0], tc.filename1)
 			p2 := filepath.Join(dirs[1], tc.filename2)
 			mustWriteFile(t, p1, []byte("shared: value\nunique1: val1"))
@@ -368,7 +368,7 @@ func TestExtractCommonRecursive_EdgeCases(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := tc.setup(t)
-			
+
 			created, err := ExtractCommonRecursive(root)
 			if tc.wantErr {
 				if err == nil {
@@ -378,8 +378,8 @@ func TestExtractCommonRecursive_EdgeCases(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
-				if tc.name == "empty directory should succeed with no output" || 
-				   tc.name == "directory with no values.yaml files should succeed with no output" {
+				if tc.name == "empty directory should succeed with no output" ||
+					tc.name == "directory with no values.yaml files should succeed with no output" {
 					if len(created) != 0 {
 						t.Fatalf("expected no created files, got %v", created)
 					}

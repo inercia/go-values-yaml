@@ -20,7 +20,7 @@ func TestComplexDirectoryStructures(t *testing.T) {
 			name: "symmetric tree structure",
 			setupDirs: []string{
 				"root/left/deep/service-a",
-				"root/left/deep/service-b", 
+				"root/left/deep/service-b",
 				"root/right/deep/service-c",
 				"root/right/deep/service-d",
 			},
@@ -112,7 +112,7 @@ config:
 		t.Run(tc.name, func(t *testing.T) {
 			_, fullDirs := setupTempDirs(t, tc.setupDirs...)
 			setupValuesFiles(t, fullDirs, tc.setupContents)
-			
+
 			rootDir := filepath.Dir(fullDirs[0])
 			// Find the actual root by going up until we find the first common ancestor
 			for strings.Contains(rootDir, "/") {
@@ -121,17 +121,17 @@ config:
 				}
 				rootDir = filepath.Dir(rootDir)
 			}
-			
+
 			created, err := ExtractCommonRecursive(rootDir)
 			if err != nil {
 				t.Fatalf("ExtractCommonRecursive failed: %v", err)
 			}
-			
+
 			hasExtracted := len(created) > 0
 			if hasExtracted != tc.expectExtracted {
 				t.Errorf("expected extraction=%v, got=%v. Created: %v", tc.expectExtracted, hasExtracted, created)
 			}
-			
+
 			t.Logf("%s: extracted %d files", tc.description, len(created))
 		})
 	}
@@ -158,7 +158,7 @@ func TestNonSiblingDetection(t *testing.T) {
 				"company/services/api",
 				"company/deep/nested/services/worker",
 			},
-			expectError: "same parent directory", 
+			expectError: "same parent directory",
 		},
 		{
 			name: "cousins should fail",
@@ -178,12 +178,12 @@ func TestNonSiblingDetection(t *testing.T) {
 				[]byte("shared: value\nunique: b"),
 			}
 			paths := setupValuesFiles(t, fullDirs, content)
-			
+
 			_, err := ExtractCommonN(paths)
 			if err == nil {
 				t.Fatalf("expected error for %s, got nil", tc.name)
 			}
-			
+
 			if !strings.Contains(err.Error(), tc.expectError) {
 				t.Fatalf("expected error containing %q, got %q", tc.expectError, err.Error())
 			}
@@ -197,13 +197,13 @@ func TestMixedSharingAcrossLevels(t *testing.T) {
 		// Create a complex hierarchy where sharing happens at different levels
 		dirs := []string{
 			"company/prod/region-us/service-a",
-			"company/prod/region-us/service-b", 
+			"company/prod/region-us/service-b",
 			"company/prod/region-eu/service-c",
 			"company/prod/region-eu/service-d",
 			"company/staging/region-us/service-a",
 			"company/staging/region-us/service-b",
 		}
-		
+
 		contents := [][]byte{
 			// Prod US services
 			[]byte(`global:
@@ -226,7 +226,7 @@ monitoring:
 service:
   name: service-b
   replicas: 2`),
-			
+
 			// Prod EU services
 			[]byte(`global:
   company: acme
@@ -248,8 +248,8 @@ monitoring:
 service:
   name: service-d
   replicas: 1`),
-			
-			// Staging US services  
+
+			// Staging US services
 			[]byte(`global:
   company: acme
   environment: staging
@@ -271,28 +271,28 @@ service:
   name: service-b
   replicas: 1`),
 		}
-		
+
 		_, fullDirs := setupTempDirs(t, dirs...)
 		setupValuesFiles(t, fullDirs, contents)
-		
+
 		rootDir := filepath.Dir(fullDirs[0])
 		for filepath.Base(rootDir) != "company" {
 			rootDir = filepath.Dir(rootDir)
 		}
-		
+
 		created, err := ExtractCommonRecursive(rootDir)
 		if err != nil {
 			t.Fatalf("ExtractCommonRecursive failed: %v", err)
 		}
-		
+
 		t.Logf("Complex hierarchy created %d common files:", len(created))
 		for _, path := range created {
 			relPath, _ := filepath.Rel(rootDir, path)
 			t.Logf("  - %s", relPath)
 		}
-		
+
 		// Should create common files at multiple levels:
-		// - region level (for services in same region)  
+		// - region level (for services in same region)
 		// - environment level (for same environments)
 		// - company level (for global company config)
 		if len(created) < 3 {
@@ -314,12 +314,12 @@ func TestZeroAndSingleFileScenarios(t *testing.T) {
 			expectError: "need at least 2 files",
 		},
 		{
-			name:        "single file", 
+			name:        "single file",
 			fileCount:   1,
 			expectError: "need at least 2 files",
 		},
 	}
-	
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var paths []string
@@ -327,12 +327,12 @@ func TestZeroAndSingleFileScenarios(t *testing.T) {
 				_, dirs := setupTempDirs(t, "single/service")
 				paths = setupValuesFiles(t, dirs, [][]byte{[]byte("service: solo")})
 			}
-			
+
 			_, err := ExtractCommonN(paths)
 			if err == nil {
 				t.Fatalf("expected error for %s, got nil", tc.name)
 			}
-			
+
 			if !strings.Contains(err.Error(), tc.expectError) {
 				t.Fatalf("expected error containing %q, got %q", tc.expectError, err.Error())
 			}
@@ -355,20 +355,20 @@ database:
   type: postgresql
   host: db.company.com
   port: 5432`)
-		
+
 		_, dirs := setupTempDirs(t, "services/replica-a", "services/replica-b", "services/replica-c")
 		contents := [][]byte{identicalContent, identicalContent, identicalContent}
 		paths := setupValuesFiles(t, dirs, contents)
-		
+
 		commonPath, err := ExtractCommonN(paths)
 		if err != nil {
 			t.Fatalf("ExtractCommonN failed: %v", err)
 		}
-		
+
 		// Common should contain everything
 		common := mustReadFile(t, commonPath)
 		assertYAMLEqual(t, identicalContent, common)
-		
+
 		// Each file should be empty or nearly empty
 		for i, path := range paths {
 			updated := mustReadFile(t, path)
@@ -383,14 +383,14 @@ database:
 func TestLargeNumberOfFiles(t *testing.T) {
 	t.Run("many files with common structure", func(t *testing.T) {
 		const numFiles = 50
-		
+
 		var dirs []string
 		var contents [][]byte
-		
+
 		for i := 0; i < numFiles; i++ {
 			serviceName := fmt.Sprintf("svc-%02d", i)
 			dirs = append(dirs, filepath.Join("services", serviceName))
-			
+
 			content := []byte(fmt.Sprintf(`global:
   company: mega-corp
   monitoring:
@@ -403,27 +403,27 @@ service:
   replicas: %d`, serviceName, 8080+i, 1+(i%5)))
 			contents = append(contents, content)
 		}
-		
+
 		_, fullDirs := setupTempDirs(t, dirs...)
 		paths := setupValuesFiles(t, fullDirs, contents)
-		
+
 		commonPath, err := ExtractCommonN(paths)
 		if err != nil {
 			t.Fatalf("ExtractCommonN failed with %d files: %v", numFiles, err)
 		}
-		
+
 		// Validate that common contains the shared global config
 		common := mustReadFile(t, commonPath)
 		if len(common) < 50 { // Should have substantial shared content
 			t.Errorf("expected substantial common content, got %d bytes", len(common))
 		}
-		
+
 		// Validate merge property for first few files (don't check all 50 for performance)
 		for i := 0; i < min(5, len(contents)); i++ {
 			updated := mustReadFile(t, paths[i])
 			validateMergeProperty(t, contents[i], common, updated)
 		}
-		
+
 		t.Logf("Successfully processed %d files, extracted %d bytes of common config", numFiles, len(common))
 	})
 }

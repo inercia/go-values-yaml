@@ -71,7 +71,6 @@ func TestExtractCommon_CreatesCommonAndUpdatesChildren(t *testing.T) {
 	}
 }
 
-
 func TestExtractCommonN_CreatesCommonAndUpdatesAll(t *testing.T) {
 	tests := []struct {
 		name        string

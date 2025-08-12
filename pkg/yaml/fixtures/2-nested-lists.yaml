@@ -1,0 +1,18 @@
+app:
+  config:
+    features:
+    - login
+    - search
+    - metrics
+    metadata:
+      owners:
+      - alice
+      - bob
+      labels:
+        env: prod
+        tier: web
+    ports:
+    - name: http
+      port: 80
+    - name: https
+      port: 443

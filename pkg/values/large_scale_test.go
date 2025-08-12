@@ -12,14 +12,14 @@ func TestLargeScaleExtraction(t *testing.T) {
 		// Setup: 12 microservices across 3 environments
 		environments := []string{"dev", "staging", "prod"}
 		services := []string{"auth", "users", "orders", "notifications"}
-		
+
 		var dirs []string
 		var contents [][]byte
-		
+
 		for _, env := range environments {
 			for _, svc := range services {
 				dirs = append(dirs, fmt.Sprintf("company/%s/services/%s", env, svc))
-				
+
 				// Create realistic service configuration
 				content := fmt.Sprintf(`global:
   company: acme-corp
@@ -39,21 +39,21 @@ database:
 				contents = append(contents, []byte(content))
 			}
 		}
-		
+
 		_, fullDirs := setupTempDirs(t, dirs...)
 		setupValuesFiles(t, fullDirs, contents)
 		rootDir := filepath.Dir(fullDirs[0])
-		
+
 		created, err := ExtractCommonRecursive(rootDir)
 		if err != nil {
 			t.Fatalf("ExtractCommonRecursive failed: %v", err)
 		}
-		
+
 		t.Logf("Created %d common files from %d original files", len(created), len(contents))
 		for _, path := range created {
 			t.Logf("  Created: %s", path)
 		}
-		
+
 		// Verify we created some meaningful common files
 		if len(created) < 1 {
 			t.Errorf("expected at least 1 common file for large deployment, got %d", len(created))
@@ -164,37 +164,37 @@ etl:
 			sharedAspect: "database and logging structure",
 		},
 	}
-	
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			content := tc.setupContent()
-			
+
 			dirs := make([]string, len(content))
 			for i := range content {
 				dirs[i] = fmt.Sprintf("services/svc-%c", 'a'+rune(i))
 			}
 			_, fullDirs := setupTempDirs(t, dirs...)
 			paths := setupValuesFiles(t, fullDirs, content)
-			
+
 			commonPath, err := ExtractCommonN(paths)
-			
+
 			if !tc.expectShared {
 				if err != ErrNoCommon {
 					t.Fatalf("expected ErrNoCommon for %s, got %v", tc.sharedAspect, err)
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Fatalf("ExtractCommonN failed for %s: %v", tc.sharedAspect, err)
 			}
-			
+
 			// Validate that something meaningful was extracted
 			common := mustReadFile(t, commonPath)
 			if len(common) < 10 { // Sanity check
 				t.Errorf("expected substantial common content for %s, got %d bytes", tc.sharedAspect, len(common))
 			}
-			
+
 			// Validate merge property
 			for i, originalContent := range content {
 				updated := mustReadFile(t, paths[i])
@@ -209,7 +209,7 @@ func getReplicasForEnv(env string) int {
 	switch env {
 	case "dev":
 		return 1
-	case "staging": 
+	case "staging":
 		return 2
 	case "prod":
 		return 5

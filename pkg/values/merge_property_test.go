@@ -12,7 +12,7 @@ import (
 // This is critical for Helm compatibility.
 func TestMergeProperty_ExtractCommon(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		y1, y2 []byte
 	}{
 		{
@@ -96,7 +96,7 @@ service:
 		t.Run(tc.name, func(t *testing.T) {
 			_, dirs := setupTempDirs(t, "a/b/x", "a/b/y")
 			paths := setupValuesFiles(t, dirs, [][]byte{tc.y1, tc.y2})
-			
+
 			commonPath, err := ExtractCommon(paths[0], paths[1])
 			if err != nil {
 				t.Fatalf("ExtractCommon failed: %v", err)
@@ -116,7 +116,7 @@ service:
 
 func TestMergeProperty_ExtractCommonN(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		inputs [][]byte
 	}{
 		{
@@ -210,14 +210,14 @@ app:
 
 func TestMergeProperty_ExtractCommonRecursive(t *testing.T) {
 	t.Run("multi-level hierarchy preserves merge property", func(t *testing.T) {
-		_, dirs := setupTempDirs(t, 
+		_, dirs := setupTempDirs(t,
 			"env/prod/apps/api",
-			"env/prod/apps/web", 
+			"env/prod/apps/web",
 			"env/prod/tools/monitor",
 			"env/staging/apps/api",
 			"env/staging/apps/web",
 		)
-		
+
 		originals := [][]byte{
 			[]byte(`global:
   org: company
@@ -257,7 +257,7 @@ app:
 		}
 
 		paths := setupValuesFiles(t, dirs, originals)
-		
+
 		// Store original content for validation
 		originalFiles := make([][]byte, len(paths))
 		for i, path := range paths {

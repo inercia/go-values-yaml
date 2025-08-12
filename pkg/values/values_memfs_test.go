@@ -9,8 +9,6 @@ import (
 	"github.com/psanford/memfs"
 )
 
-
-
 func TestExtractCommonRecursive_MemFS_DeepHierarchyMultiLevel(t *testing.T) {
 	tests := []struct {
 		name string

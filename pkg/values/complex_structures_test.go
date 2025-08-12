@@ -304,7 +304,7 @@ func TestComplexHierarchyExtraction(t *testing.T) {
 			setupStructure: func(t *testing.T) string {
 				_, dirs := setupTempDirs(t,
 					"company/prod/apis/auth",
-					"company/prod/apis/users", 
+					"company/prod/apis/users",
 					"company/prod/frontend/web",
 					"company/staging/apis/auth",
 					"company/staging/apis/users",
@@ -393,7 +393,7 @@ service:
 			},
 			expectedFiles: []string{
 				"company/prod/apis/values.yaml",
-				"company/staging/apis/values.yaml", 
+				"company/staging/apis/values.yaml",
 				"company/values.yaml",
 			},
 		},
@@ -613,18 +613,18 @@ service:
 
 			// Now test extraction and reconstruction
 			_, dirs := setupTempDirs(t, "test/a", "test/b")
-			
+
 			// Create a scenario where extraction should work
 			file1 := tc.expected
 			file2 := tc.expected // Same content to ensure common extraction
-			
+
 			paths := setupValuesFiles(t, dirs, [][]byte{file1, file2})
-			
+
 			commonPath, err := ExtractCommon(paths[0], paths[1])
 			if err != nil && err != ErrNoCommon {
 				t.Fatalf("ExtractCommon failed: %v", err)
 			}
-			
+
 			if err == ErrNoCommon {
 				// If no common, files should be unchanged
 				assertYAMLEqual(t, file1, mustReadFile(t, paths[0]))
@@ -634,7 +634,7 @@ service:
 				common := mustReadFile(t, commonPath)
 				updated1 := mustReadFile(t, paths[0])
 				updated2 := mustReadFile(t, paths[1])
-				
+
 				validateMergeProperty(t, file1, common, updated1)
 				validateMergeProperty(t, file2, common, updated2)
 			}
