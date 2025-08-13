@@ -499,3 +499,346 @@ func yamlToIface(b []byte, v *any) error {
 func deepEqual(a, b any) bool {
 	return reflect.DeepEqual(a, b)
 }
+
+func TestMergeYAML_HelmCompatibility_BasicAndNested(t *testing.T) {
+	cases := []struct {
+		name   string
+		base   []byte
+		over   []byte
+		expect []byte
+	}{
+		{
+			name: "scalar override and deep map merge",
+			base: []byte(`
+service:
+  port: 80
+  type: ClusterIP
+feature: true
+image: app:v1
+`),
+			over: []byte(`
+service:
+  type: NodePort
+feature: false
+image: app:v2
+`),
+			expect: []byte(`service:
+  port: 80
+  type: NodePort
+feature: false
+image: app:v2
+`),
+		},
+		{
+			name: "list replacement (not merge)",
+			base: []byte(`
+arr:
+  - 1
+  - 2
+nested:
+  arr:
+    - a
+    - b
+`),
+			over: []byte(`
+arr:
+  - 9
+nested:
+  arr:
+    - x
+`),
+			expect: []byte(`arr:
+- 9
+nested:
+  arr:
+  - x
+`),
+		},
+		{
+			name: "type conflicts resolved by overlay (last wins)",
+			base: []byte(`
+obj:
+  a: 1
+list:
+  - 1
+num: 5
+flag: true
+`),
+			over: []byte(`
+obj: 42
+list:
+  x: 1
+num:
+  - 0
+flag: false
+`),
+			expect: []byte(`obj: 42
+list:
+  x: 1
+num:
+- 0
+flag: false
+`),
+		},
+		{
+			name: "null in overlay nullifies value (last wins)",
+			base: []byte(`
+foo:
+  bar: 1
+  baz: 2
+`),
+			over: []byte(`
+foo:
+  bar: null
+`),
+			expect: []byte(`foo:
+  bar: null
+  baz: 2
+`),
+		},
+		{
+			name: "top-level list replacement",
+			base: []byte(`
+- a
+- b
+`),
+			over: []byte(`
+- c
+`),
+			expect: []byte(`- c
+`),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := MergeYAML(tc.base, tc.over)
+			if err != nil {
+				t.Fatalf("MergeYAML error: %v", err)
+			}
+			assertYAMLEqual(t, tc.expect, got)
+		})
+	}
+}
+
+func TestMergeYAML_HelmCompatibility_MultiFileChain(t *testing.T) {
+	base := []byte(`
+a: 1
+b:
+  c: 1
+`)
+	over1 := []byte(`
+a: 2
+b:
+  d: 2
+`)
+	over2 := []byte(`
+b:
+  c: 3
+`)
+
+	m1, err := MergeYAML(base, over1)
+	if err != nil {
+		panic(err)
+	}
+	got, err := MergeYAML(m1, over2)
+	if err != nil {
+		panic(err)
+	}
+	expect := []byte(`a: 2
+b:
+  c: 3
+  d: 2
+`)
+	assertYAMLEqual(t, expect, got)
+}
+
+// Additional coverage tests
+func TestExtractCommon_EmptyDocs_Normalization(t *testing.T) {
+	tests := []struct {
+		name       string
+		y1, y2     []byte
+		wantCommon []byte
+		wantU1     []byte
+		wantU2     []byte
+	}{
+		{
+			name:       "both empty docs",
+			y1:         []byte(""),
+			y2:         []byte(""),
+			wantCommon: []byte("{}\n"),
+			wantU1:     []byte("{}\n"),
+			wantU2:     []byte("{}\n"),
+		},
+		{
+			name:       "first empty, second map",
+			y1:         []byte(""),
+			y2:         []byte("a: 1\n"),
+			wantCommon: []byte("{}\n"),
+			wantU1:     []byte("{}\n"),
+			wantU2:     []byte("a: 1\n"),
+		},
+		{
+			name:       "first map, second empty",
+			y1:         []byte("a: 1\n"),
+			y2:         []byte(""),
+			wantCommon: []byte("{}\n"),
+			wantU1:     []byte("a: 1\n"),
+			wantU2:     []byte("{}\n"),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common, u1, u2, err := ExtractCommon(tc.y1, tc.y2)
+			if err != nil {
+				t.Fatalf("ExtractCommon error: %v", err)
+			}
+			assertYAMLEqual(t, tc.wantCommon, common)
+			assertYAMLEqual(t, tc.wantU1, u1)
+			assertYAMLEqual(t, tc.wantU2, u2)
+			m1, _ := MergeYAML(common, u1)
+			m2, _ := MergeYAML(common, u2)
+			// Normalize empty originals to {} for comparison, since merge emits empty as {}
+			expY1 := tc.y1
+			expY2 := tc.y2
+			if len(expY1) == 0 {
+				expY1 = []byte("{}\n")
+			}
+			if len(expY2) == 0 {
+				expY2 = []byte("{}\n")
+			}
+			assertYAMLEqual(t, expY1, m1)
+			assertYAMLEqual(t, expY2, m2)
+		})
+	}
+}
+
+func TestExtractCommon_NestedListDifferences_NoPartial(t *testing.T) {
+	y1 := []byte(`a:
+  b:
+  - 1
+  - 2
+  - 3
+`)
+	y2 := []byte(`a:
+  b:
+  - 1
+  - 2
+`)
+	wantCommon := []byte("{}\n")
+	wantU1 := []byte("a:\n  b:\n  - 1\n  - 2\n  - 3\n")
+	wantU2 := []byte("a:\n  b:\n  - 1\n  - 2\n")
+
+	common, u1, u2, err := ExtractCommon(y1, y2)
+	if err != nil {
+		t.Fatalf("ExtractCommon error: %v", err)
+	}
+	assertYAMLEqual(t, wantCommon, common)
+	assertYAMLEqual(t, wantU1, u1)
+	assertYAMLEqual(t, wantU2, u2)
+	m1, _ := MergeYAML(common, u1)
+	m2, _ := MergeYAML(common, u2)
+	assertYAMLEqual(t, y1, m1)
+	assertYAMLEqual(t, y2, m2)
+}
+
+func TestExtractCommon_NestedTypeConflict(t *testing.T) {
+	y1 := []byte(`a:
+  b:
+    x: 1
+`)
+	y2 := []byte(`a:
+  b: 2
+`)
+	wantCommon := []byte("{}\n")
+	wantU1 := []byte("a:\n  b:\n    x: 1\n")
+	wantU2 := []byte("a:\n  b: 2\n")
+
+	common, u1, u2, err := ExtractCommon(y1, y2)
+	if err != nil {
+		t.Fatalf("ExtractCommon error: %v", err)
+	}
+	assertYAMLEqual(t, wantCommon, common)
+	assertYAMLEqual(t, wantU1, u1)
+	assertYAMLEqual(t, wantU2, u2)
+	m1, _ := MergeYAML(common, u1)
+	m2, _ := MergeYAML(common, u2)
+	assertYAMLEqual(t, y1, m1)
+	assertYAMLEqual(t, y2, m2)
+}
+
+func TestExtractCommonN_Lists_AllEqual_OptionDisabled(t *testing.T) {
+	inputs := [][]byte{
+		[]byte(`a: [1,2,3]`),
+		[]byte(`a: [1,2,3]`),
+		[]byte(`a: [1,2,3]`),
+	}
+	common, rems, err := ExtractCommonN(inputs, WithIncludeEqualListsInCommon(false))
+	if err != nil {
+		t.Fatalf("ExtractCommonN error: %v", err)
+	}
+	assertYAMLEqual(t, []byte("{}\n"), common)
+	if len(rems) != 3 {
+		t.Fatalf("expected 3 remainders, got %d", len(rems))
+	}
+	for i := range rems {
+		assertYAMLEqual(t, inputs[i], rems[i])
+	}
+}
+
+func TestExtractCommonN_KeyIntersection(t *testing.T) {
+	inputs := [][]byte{
+		[]byte(`a:
+  x: 1
+  y: 2
+b: 1
+`),
+		[]byte(`a:
+  x: 1
+  z: 3
+b: 2
+`),
+		[]byte(`a:
+  x: 1
+  y: 9
+c: 3
+`),
+	}
+	wantCommon := []byte("a:\n  x: 1\n")
+	wantRemainders := [][]byte{
+		[]byte("a:\n  y: 2\nb: 1\n"),
+		[]byte("a:\n  z: 3\nb: 2\n"),
+		[]byte("a:\n  y: 9\nc: 3\n"),
+	}
+	common, rems, err := ExtractCommonN(inputs)
+	if err != nil {
+		t.Fatalf("ExtractCommonN error: %v", err)
+	}
+	assertYAMLEqual(t, wantCommon, common)
+	if len(rems) != len(wantRemainders) {
+		t.Fatalf("expected %d remainders, got %d", len(wantRemainders), len(rems))
+	}
+	for i := range rems {
+		assertYAMLEqual(t, wantRemainders[i], rems[i])
+		m, _ := MergeYAML(common, rems[i])
+		assertYAMLEqual(t, inputs[i], m)
+	}
+}
+
+func TestExtractCommonN_OneEmpty_NoCommon(t *testing.T) {
+	inputs := [][]byte{
+		[]byte(""),
+		[]byte("a: 1\n"),
+		[]byte("a: 1\n"),
+	}
+	common, rems, err := ExtractCommonN(inputs)
+	if err != nil {
+		t.Fatalf("ExtractCommonN error: %v", err)
+	}
+	assertYAMLEqual(t, []byte("{}\n"), common)
+	if len(rems) != 3 {
+		t.Fatalf("expected 3 remainders, got %d", len(rems))
+	}
+	assertYAMLEqual(t, []byte("{}\n"), rems[0])
+	assertYAMLEqual(t, []byte("a: 1\n"), rems[1])
+	assertYAMLEqual(t, []byte("a: 1\n"), rems[2])
+}
